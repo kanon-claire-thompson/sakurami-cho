@@ -59,8 +59,8 @@ export interface BaseStationChannels {
    */
   core: number
   /**
-   * 琥珀の混ぜ具合（0〜1。既定 0 = 今の色）。コアの緑（PALETTE.comm）と外周リングの区切りの表示灯（24 個。PALETTE.cyan）の色を、
-   * 琥珀（PALETTE.amber）へ寄せる。照明のコアの光の色も同じ。設定の LOST（消灯し、外周の表示灯が琥珀色）は core 0・amber 1
+   * 琥珀の混ぜ具合（0〜1。既定 0 = 今の色）。コアの緑（PALETTE.comm）と外周リングの表示灯（区切りの表示灯 24 個と縁の光の線。PALETTE.cyan）の色を、
+   * 琥珀（PALETTE.amber）へ寄せる（外周の表示灯は白く飛ばないよう、琥珀のぶん少し暗く）。照明のコアの光の色も同じ。設定の LOST（消灯し、外周の表示灯が琥珀色）は core 0・amber 1
    */
   amber: number
 }
@@ -76,6 +76,9 @@ const _c = new THREE.Color()
 function coreColor(amber: number, out: THREE.Color): THREE.Color {
   return amber > 0 ? out.copy(_comm).lerp(_amber, Math.min(1, amber)) : out.copy(_comm)
 }
+
+/** 外周の表示灯を琥珀にしたときに明るさを落とす割合（琥珀 1 で 1 − 0.45 倍） */
+const AMBER_DIM = 0.45
 
 /** 0〜1 に収める（数でなければ既定の値） */
 const unit = (v: number, fallback: number) => (Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : fallback)
@@ -182,13 +185,13 @@ function rings(b: Build) {
     segLight: geo(b, new THREE.BoxGeometry(0.12, 0.01, 0.01)),
   }
 
-  const lipGlow = glowMaterial(PALETTE.cyan, GLOW.strong)
+  // 外周リングの縁の光の線と区切りの表示灯は、琥珀の混ぜ具合（amber）で色を変えるので、キャッシュの発光の素材の写しを持つ（既定の色は同じ）
+  const lipGlow = b.own.add(glowMaterial(PALETTE.cyan, GLOW.strong).clone())
   const nodeGlow = glowMaterial(PALETTE.blue, 2.6)
   // 配信カメラでは頭の後ろを通るので、にじまない程度に抑える
   const tickGlow = glowMaterial(PALETTE.cyan, 1.1)
   // 内側リングの目盛りは、リングの前の面とぴったり同じ深さ（z = 0.060）。作る順によらず面より手前に描く
   const tickOverlay = overlayGlowMaterial(PALETTE.cyan, 1.1)
-  // 区切りの表示灯は琥珀の混ぜ具合（amber）で色を変えるので、キャッシュの発光の素材の写しを持つ（既定の色は同じ）
   const SEG_GLOW = 2.2
   const segGlow = b.own.add(glowMaterial(PALETTE.cyan, SEG_GLOW).clone())
 
@@ -265,11 +268,14 @@ function rings(b: Build) {
       middle.rotation.z -= dt * 0.12 * boost
       inner.rotation.z += dt * 0.2 * boost
       gimbal.rotation.y += dt * 0.35 * boost
-      // 外周の区切りの表示灯: 琥珀の混ぜ具合で、シアンから琥珀へ（変わったときだけ書く）
+      // 外周の表示灯（区切りの表示灯と縁の光の線）: 琥珀の混ぜ具合で、シアンから琥珀へ（変わったときだけ書く）。
+      // 琥珀は明るいと白く飛んで琥珀に見えないので、琥珀のぶん明るさを落とす（琥珀 1 で 0.55 倍）
       const amber = unit(b.ch.amber, 0)
       if (amber !== segAmber) {
         segAmber = amber
-        segGlow.color.copy(_cyan).lerp(_amber, amber).multiplyScalar(SEG_GLOW)
+        const dim = 1 - AMBER_DIM * amber
+        segGlow.color.copy(_cyan).lerp(_amber, amber).multiplyScalar(SEG_GLOW * dim)
+        lipGlow.color.copy(_cyan).lerp(_amber, amber).multiplyScalar(GLOW.strong * dim)
       }
     },
   }

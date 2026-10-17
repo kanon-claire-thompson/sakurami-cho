@@ -510,7 +510,7 @@ describe('基地局のキット（4-6）', () => {
     lab.dispose()
   })
 
-  test('コアの明るさ（core）と琥珀の混ぜ具合（amber）: コアの球・光る殻・まわりの緑・にじみ・外周の表示灯・照明のコアの光。既定の 1・0 は今の見た目のまま', async () => {
+  test('コアの明るさ（core）と琥珀の混ぜ具合（amber）: コアの球・光る殻・まわりの緑・にじみ・外周の表示灯と縁の線・照明のコアの光。既定の 1・0 は今の見た目のまま', async () => {
     const { PALETTE, GLOW } = await load<{ PALETTE: Record<string, string>; GLOW: Record<string, number> }>('../world/palette.ts')
     const fx = { core: 1, amber: 0 }
     const source = {
@@ -579,7 +579,9 @@ describe('基地局のキット（4-6）', () => {
     expect(spriteMat.opacity).toBe(0)
     expect(coreLight.intensity).toBe(0)
     const amber = new THREE.Color(PALETTE.amber)
-    for (let i = 0; i < 3; i++) expect(seg.color.toArray()[i]!).toBeCloseTo(amber.toArray()[i]! * 2.2, 12)
+    for (let i = 0; i < 3; i++) expect(seg.color.toArray()[i]!).toBeCloseTo(amber.toArray()[i]! * 2.2 * 0.55, 12)
+    const lip = ((ring.children[2] as THREE.Mesh).material as THREE.MeshBasicMaterial).color
+    for (let i = 0; i < 3; i++) expect(lip.toArray()[i]!).toBeCloseTo(amber.toArray()[i]! * GLOW.strong! * 0.55, 12)
     expect(coreLight.color.getHexString()).toBe(amber.getHexString())
     // 範囲の外・数でない値は収める（明るさは既定の 1 に）
     fx.core = Number.NaN
@@ -671,9 +673,9 @@ describe('基地局のキット（4-6）', () => {
     // 共有の素材は捨てない
     expect([...usedMaterials].filter((m) => shared.has(m) && disposed.has(m))).toEqual([])
     // キャッシュの発光の素材（glowMaterial・overlayGlowMaterial）は捨てない。捨てる MeshBasicMaterial はコアの光る芯（clone）・にじみの板と、
-    // コアの明るさ・琥珀の混ぜ具合で変える写し（外周の区切りの表示灯・まわりの緑の線 2 つ）の 5 つだけ
+    // コアの明るさ・琥珀の混ぜ具合で変える写し（外周の縁の光の線・区切りの表示灯・まわりの緑の線 2 つ）の 6 つだけ
     const basics = [...usedMaterials].filter((m) => (m as THREE.MeshBasicMaterial).isMeshBasicMaterial)
-    expect(basics.filter((m) => disposed.has(m)).length).toBe(5)
+    expect(basics.filter((m) => disposed.has(m)).length).toBe(6)
     // そのほかの素材（画面・危険線・ガラスの球・光る球・流れる光の芯・ステッカー・グレーチング）は捨てる
     expect([...usedMaterials].filter((m) => !shared.has(m) && !(m as THREE.MeshBasicMaterial).isMeshBasicMaterial && !disposed.has(m))).toEqual([])
   })

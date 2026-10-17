@@ -6,6 +6,7 @@ import { LAB_PLACEMENTS, type LabPlacement } from '../../../core/lab/placements'
 import { createLabEnvironment } from './environment'
 import { labArea, labPoint, labSpot, lightFactor } from './lights'
 import { LAB_ENV_INTENSITY, LAB_LIGHTS } from './lightTable'
+import { PALETTE } from '../../palette'
 
 /**
  * ラボの照明（docs/design/map-split.md §6 の「段 4」・4-3。案の §3.1）。光の表（lightTable.ts の LAB_LIGHTS）の並びのまま光を作り、
@@ -26,9 +27,14 @@ export interface LabCoreChannels {
   flash: number
   /** 演出の脈（0〜1） */
   pulse: number
+  /** コアの明るさ（0〜1。既定 1。0 で消灯）。光の強さに掛ける */
+  core: number
+  /** 琥珀の混ぜ具合（0〜1。既定 0）。光の色を通信のグリーンから琥珀へ寄せる */
+  amber: number
 }
 
-const CORE_CHANNELS: Readonly<LabCoreChannels> = { link: 0, flash: 0, pulse: 0 }
+const CORE_CHANNELS: Readonly<LabCoreChannels> = { link: 0, flash: 0, pulse: 0, core: 1, amber: 0 }
+const _amberColor = new THREE.Color(PALETTE.amber)
 
 export interface LabLightingOptions {
   renderer: WebGPURenderer
@@ -37,7 +43,7 @@ export interface LabLightingOptions {
   quality: 'high' | 'low'
   /** 置き場所の表（印の付いた光・光る板のうち、表に無い置き場所の物は作らない）。既定は LAB_PLACEMENTS */
   placements?: readonly LabPlacement[]
-  /** 入力の値（照明のコアの光が基地局の link・flash・pulse を読む。あとから bindChannels でも結び付けられる） */
+  /** 入力の値（照明のコアの光が基地局の link・flash・pulse・core・amber を読む。あとから bindChannels でも結び付けられる） */
   channels?: { baseStation?: Partial<LabCoreChannels> }
   /** 差し込み口 stage の中身（作る時に入れる。あとから slots.stage.set でも入れられる） */
   stage?: LabSlotContent | null
@@ -50,7 +56,7 @@ export interface LabLighting {
   readonly slots: { readonly stage: LabSlot }
   /** 基地局の入力の値（照明のコアの光が読む。読むたびに結び付けた物（options.channels.baseStation か bindChannels の物）を見る） */
   readonly channels: { readonly baseStation: Readonly<LabCoreChannels> }
-  /** 入力の値を外の物に結び付ける（読むたびに見る。写さない。null で既定の値（0）に） */
+  /** 入力の値を外の物に結び付ける（読むたびに見る。写さない。null で既定の値（link・flash・pulse は 0、core は 1、amber は 0）に） */
   bindChannels(source: { baseStation?: Partial<LabCoreChannels> | null }): void
   attach(): () => void
   update(dt: number, f: LabFrame): void
@@ -71,6 +77,9 @@ export function createLabLighting(o: LabLightingOptions): LabLighting {
   const lights: THREE.Light[] = []
   let hemi: { light: THREE.HemisphereLight; intensity: number; dim: number | undefined } | null = null
   let core: THREE.PointLight | null = null
+  let coreAmber = 0
+  /** コアの光のもとの色（光の表の色） */
+  const commColor = new THREE.Color()
 
   for (const spec of LAB_LIGHTS) {
     if (spec.kind === 'slot') {
@@ -89,6 +98,7 @@ export function createLabLighting(o: LabLightingOptions): LabLighting {
       case 'core': {
         const light = new THREE.PointLight(spec.color, spec.intensity, spec.distance, 2)
         light.position.set(...spec.at)
+        commColor.set(spec.color)
         core = light
         object.add(light)
         lights.push(light)
@@ -156,7 +166,14 @@ export function createLabLighting(o: LabLightingOptions): LabLighting {
         // ゆっくり呼吸するように明滅し、配信の「リンク確立」などで強くなる
         const t = f.time
         const base = 8 + Math.sin(t * 1.3) * 1.2 + Math.sin(t * 7.1) * 0.25
-        core.intensity = base * (1 + baseStation.link * 0.35 + baseStation.flash * 2.5 + baseStation.pulse * 1.8)
+        // コアの明るさ（core）を掛け、色は琥珀の混ぜ具合（amber）で（既定の 1・0 では今の光のまま）
+        const level = Number.isFinite(baseStation.core) ? Math.min(1, Math.max(0, baseStation.core)) : 1
+        core.intensity = base * (1 + baseStation.link * 0.35 + baseStation.flash * 2.5 + baseStation.pulse * 1.8) * level
+        const amber = Number.isFinite(baseStation.amber) ? Math.min(1, Math.max(0, baseStation.amber)) : 0
+        if (amber !== coreAmber) {
+          coreAmber = amber
+          core.color.copy(commColor).lerp(_amberColor, amber)
+        }
       }
       for (const d of dimmed) d.light.intensity = d.intensity * lightFactor(d.dim)
       stage.update(dt, f)

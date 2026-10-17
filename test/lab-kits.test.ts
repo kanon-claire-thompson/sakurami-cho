@@ -463,9 +463,9 @@ describe('基地局のキット（4-6）', () => {
     lab.dispose()
   })
 
-  test('入力の値は読むたびに見て、リング・管・コアと照明のコアの光が読む（既定は 0）', async () => {
+  test('入力の値は読むたびに見て、リング・管・コアと照明のコアの光が読む（既定は 0。コアの明るさ core は 1）', async () => {
     const lab0 = await makeLab()
-    expect({ ...lab0.kits.get('baseStation')!.channels }).toEqual({ ring: 0, ringBoost: 0, link: 0, flash: 0, pulse: 0 })
+    expect({ ...lab0.kits.get('baseStation')!.channels }).toEqual({ ring: 0, ringBoost: 0, link: 0, flash: 0, pulse: 0, core: 1, amber: 0 })
     lab0.dispose()
 
     const fx = { ring: 0, ringBoost: 0, link: 0, flash: 0, pulse: 0 }
@@ -507,6 +507,86 @@ describe('基地局のキット（4-6）', () => {
     kit.update(0, frame(3))
     const after = flowCores(kit.object).map((m) => (m.material as UniformsMaterial).uniforms.uIntensity!.value as number)
     after.forEach((v, i) => expect(v).toBeCloseTo(before[i]! * (1 + 1.5), 12))
+    lab.dispose()
+  })
+
+  test('コアの明るさ（core）と琥珀の混ぜ具合（amber）: コアの球・光る殻・まわりの緑・にじみ・外周の表示灯・照明のコアの光。既定の 1・0 は今の見た目のまま', async () => {
+    const { PALETTE, GLOW } = await load<{ PALETTE: Record<string, string>; GLOW: Record<string, number> }>('../world/palette.ts')
+    const fx = { core: 1, amber: 0 }
+    const source = {
+      get core() {
+        return fx.core
+      },
+      get amber() {
+        return fx.amber
+      },
+    }
+    const plain = await makeLab()
+    const lab = await makeLab(undefined, { channels: { baseStation: source }, slots: {} })
+    const kit = lab.kits.get('baseStation')!
+    const { ring, core } = stationParts(kit)
+    const coreMesh = core.getObjectByName('baseStation:core') as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>
+    const shell = core.children.find((c) => Array.isArray((c as THREE.Mesh).material)) as THREE.Mesh<THREE.BufferGeometry, THREE.Material[]>
+    const holo = shell.material[1] as THREE.Material & { intensity: number; color: THREE.Color }
+    const energy = (core.children[core.children.length - 2]!.children[0] as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>).material
+    const glow = core.children[core.children.length - 1]!
+    const spriteMat = (() => {
+      let m: THREE.MeshBasicMaterial | null = null
+      glow.traverse((o) => {
+        if ((o as THREE.Mesh).isMesh) m = (o as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>).material
+      })
+      return m! as THREE.MeshBasicMaterial
+    })()
+    const seg = (ring.children[3] as THREE.InstancedMesh).material as THREE.MeshBasicMaterial
+    const coreLight = lab.lighting.object.children[1] as THREE.PointLight
+
+    // 既定（1・0）: 結び付けていないラボと同じ色と明るさ
+    const { ring: ring0, core: core0 } = stationParts(plain.kits.get('baseStation')!)
+    plain.kits.update(0, frame(2))
+    plain.lighting.update(0, { time: 2 })
+    kit.update(0, frame(2))
+    lab.lighting.update(0, { time: 2 })
+    const core0Mesh = core0.getObjectByName('baseStation:core') as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>
+    expect(coreMesh.material.color.toArray()).toEqual(core0Mesh.material.color.toArray())
+    expect(((ring0.children[3] as THREE.InstancedMesh).material as THREE.MeshBasicMaterial).color.toArray()).toEqual(seg.color.toArray())
+    expect(seg.color.toArray()).toEqual(new THREE.Color(PALETTE.cyan).multiplyScalar(2.2).toArray())
+    expect(energy.color.toArray()).toEqual(new THREE.Color(PALETTE.comm).multiplyScalar(GLOW.strong!).toArray())
+    expect(holo.intensity).toBe(1.2)
+    expect(spriteMat.opacity).toBe(0.38)
+    expect(coreLight.intensity).toBe((plain.lighting.object.children[1] as THREE.PointLight).intensity)
+    expect(coreLight.color.getHexString()).toBe(new THREE.Color(PALETTE.comm).getHexString())
+    const bright = coreMesh.material.color.g
+    const light = coreLight.intensity
+
+    // 明るさ 0.5: コアの球・光る殻・まわりの緑・にじみ・照明のコアの光が半分。外周の表示灯はそのまま
+    fx.core = 0.5
+    kit.update(0, frame(2))
+    lab.lighting.update(0, { time: 2 })
+    expect(coreMesh.material.color.g).toBeCloseTo(bright * 0.5, 12)
+    expect(holo.intensity).toBeCloseTo(0.6, 12)
+    expect(energy.color.g).toBeCloseTo(new THREE.Color(PALETTE.comm).g * GLOW.strong! * 0.5, 12)
+    expect(spriteMat.opacity).toBeCloseTo(0.19, 12)
+    expect(coreLight.intensity).toBeCloseTo(light * 0.5, 12)
+    expect(seg.color.toArray()).toEqual(new THREE.Color(PALETTE.cyan).multiplyScalar(2.2).toArray())
+
+    // LOST（消灯・琥珀）: コアは消え、外周の表示灯と照明の色は琥珀
+    fx.core = 0
+    fx.amber = 1
+    kit.update(0, frame(2))
+    lab.lighting.update(0, { time: 2 })
+    expect(coreMesh.material.color.toArray()).toEqual([0, 0, 0])
+    expect(holo.intensity).toBe(0)
+    expect(spriteMat.opacity).toBe(0)
+    expect(coreLight.intensity).toBe(0)
+    const amber = new THREE.Color(PALETTE.amber)
+    for (let i = 0; i < 3; i++) expect(seg.color.toArray()[i]!).toBeCloseTo(amber.toArray()[i]! * 2.2, 12)
+    expect(coreLight.color.getHexString()).toBe(amber.getHexString())
+    // 範囲の外・数でない値は収める（明るさは既定の 1 に）
+    fx.core = Number.NaN
+    fx.amber = 3
+    kit.update(0, frame(2))
+    expect(coreMesh.material.color.r).toBeCloseTo(amber.r * GLOW.core! * (1 + Math.sin(2 * 1.3) * 0.12 + Math.max(0, Math.sin(2 * 0.45)) ** 16 * 0.6), 9)
+    plain.dispose()
     lab.dispose()
   })
 
@@ -590,9 +670,10 @@ describe('基地局のキット（4-6）', () => {
     expect([...geometries].filter((g) => !disposed.has(g))).toEqual([])
     // 共有の素材は捨てない
     expect([...usedMaterials].filter((m) => shared.has(m) && disposed.has(m))).toEqual([])
-    // キャッシュの発光の素材（glowMaterial・overlayGlowMaterial）は捨てない。捨てる MeshBasicMaterial はコアの光る芯（clone）とにじみの板の 2 つだけ
+    // キャッシュの発光の素材（glowMaterial・overlayGlowMaterial）は捨てない。捨てる MeshBasicMaterial はコアの光る芯（clone）・にじみの板と、
+    // コアの明るさ・琥珀の混ぜ具合で変える写し（外周の区切りの表示灯・まわりの緑の線 2 つ）の 5 つだけ
     const basics = [...usedMaterials].filter((m) => (m as THREE.MeshBasicMaterial).isMeshBasicMaterial)
-    expect(basics.filter((m) => disposed.has(m)).length).toBe(2)
+    expect(basics.filter((m) => disposed.has(m)).length).toBe(5)
     // そのほかの素材（画面・危険線・ガラスの球・光る球・流れる光の芯・ステッカー・グレーチング）は捨てる
     expect([...usedMaterials].filter((m) => !shared.has(m) && !(m as THREE.MeshBasicMaterial).isMeshBasicMaterial && !disposed.has(m))).toEqual([])
   })

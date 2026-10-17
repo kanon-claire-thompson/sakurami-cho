@@ -43,6 +43,25 @@ minor の版を上げる。
 | character | `townSpots`・`teleport`・`placeAtPoint`・型 `TownSpot` | ワープ（下の「カメラ・直接の操作・ワープ」） |
 | react | `TownClock`・`TownRoot`・`TownView`・`TownExposure`・`LabAtmosphere`・`LabSlot`・`CharacterView`・`RideDriver`・`useLab` などの hooks | R3F の薄い包み（`export *`） |
 
+## 基地局の入力の値（`configureLab` の `channels.baseStation`）
+
+基地局（XW-08）の光り方は、使う側が入力の値（`BaseStationChannels`）で決める。値は読むたびに見る（getter の付いた物を渡せば、使う側の値をそのまま読む）。
+渡さない名前は既定の値のまま。
+
+| 名前 | 値（既定） | 効く所 |
+|---|---|---|
+| `ring` | 0〜1（0） | リングの加速（回る速さが 1 + 5 × ring 倍） |
+| `ringBoost` | 0〜1（0） | リングの一気の加速（回る速さに 14 × ringBoost を足し、管の流れも速く） |
+| `link` | 0〜1（0） | 通信のグリーン（管の色・コアの明るさ・画面の LINK ESTABLISHED） |
+| `flash` | 0〜1（0） | 接続が確立した瞬間のフラッシュ |
+| `pulse` | 0〜1（0） | 演出の脈 |
+| `core` | 0〜1（1） | コアの明るさ。コアの球・光る殻・まわりのエネルギーリング・支柱とハウジングの緑の線・にじみと、照明のコアの光に掛ける。0 で消灯 |
+| `amber` | 0〜1（0） | 琥珀の混ぜ具合。コアの緑と外周リングの区切りの表示灯（24 個。ふだんはシアン）の色、照明のコアの光の色を琥珀（`PALETTE.amber`）へ寄せる |
+
+`core`・`amber` は、設定（vol6 3-8）の状態の表示を外から作るための値。たとえば STANDBY（淡い緑の呼吸光）は `core` を 0.2〜0.45 くらいでゆっくり上下させる、
+LOST（消灯し、外周の表示灯が琥珀色）は `core: 0`・`amber: 1`。呼吸・明滅の形（時間の動き）は地図では決めず、使う側が毎コマの値で作る
+（kanon-lab は `src/stream/core.ts`）。既定の 1・0 では前と同じ見た目（反射用の環境の光る板は、コアの明るさで変えない）。
+
 ## 毎コマの順
 
 毎コマの順（R3F の `useFrame` の優先度。小さい方が先。例のアプリの `src/scene/Scene.tsx`）: 町の時計 `<TownClock>`（−90）→ 乗る仕組み `<RideDriver>`（−79）→

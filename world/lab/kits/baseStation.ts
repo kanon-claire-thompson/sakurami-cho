@@ -32,7 +32,9 @@ import { markDynamic } from '../../staticMerge'
  * （床のケーブルと危険線はワールド座標のまま。前は置き場所の群の外の兄弟）。
  *
  * - channels（BaseStationChannels）: リングの加速（ring・ringBoost）・通信のグリーン（link）・フラッシュ（flash）・演出の脈（pulse）。既定は 0
- *   （配信が無くても待ち受けで回り・脈打つ）。kanon-lab は配信の演出（streamFx・showFx）を読む getter で結び付ける。照明のコアの光もこれを読む
+ *   （配信が無くても待ち受けで回り・脈打つ）。kanon-lab は配信の演出（streamFx・showFx）を読む getter で結び付ける。照明のコアの光もこれを読む。
+ *   コアの明るさ（core。既定 1 = 今の明るさ、0 で消灯）と琥珀の混ぜ具合（amber。既定 0 = 緑のまま）で、Qコアの状態（設定資料 vol6 3-8 の
+ *   STANDBY・FLUCTUATING・LOST など）を外から決められる。状態ごとの光り方（呼吸・明滅）は使う側が時間で動かして入れる
  * - screens: castor・pollux（320×240・毎秒 12 回）。既定の中身は待機表示（baseStation.screen.ts。channels の link・flash を読む）。
  *   kanon-lab は ON AIR の入った画面（scene/stream/linkStatusScreen.ts）を入れる
  * - 毎コマ（前の購読の順）: カストルの管 → カストルの画面 → ポルックスの管 → ポルックスの画面 → リング → コアのにじみ（カメラを向く）→ コア →
@@ -51,9 +53,32 @@ export interface BaseStationChannels {
   flash: number
   /** 演出の脈（0〜1） */
   pulse: number
+  /**
+   * コアの明るさ（0〜1。既定 1 = 今の明るさ、0 = 消灯）。コアの球・光る殻・まわりのエネルギーリング・支柱とハウジングの緑の線・にじみと、
+   * 照明のコアの光に掛ける（link・flash・pulse で強めたあとの明るさに掛ける）
+   */
+  core: number
+  /**
+   * 琥珀の混ぜ具合（0〜1。既定 0 = 今の色）。コアの緑（PALETTE.comm）と外周リングの区切りの表示灯（24 個。PALETTE.cyan）の色を、
+   * 琥珀（PALETTE.amber）へ寄せる。照明のコアの光の色も同じ。設定の LOST（消灯し、外周の表示灯が琥珀色）は core 0・amber 1
+   */
+  amber: number
 }
 
-export const BASE_STATION_CHANNELS: Readonly<BaseStationChannels> = { ring: 0, ringBoost: 0, link: 0, flash: 0, pulse: 0 }
+export const BASE_STATION_CHANNELS: Readonly<BaseStationChannels> = { ring: 0, ringBoost: 0, link: 0, flash: 0, pulse: 0, core: 1, amber: 0 }
+
+const _comm = new THREE.Color(PALETTE.comm)
+const _cyan = new THREE.Color(PALETTE.cyan)
+const _amber = new THREE.Color(PALETTE.amber)
+const _c = new THREE.Color()
+
+/** コアの色（琥珀の混ぜ具合 amber で緑から琥珀へ）。out に書いて返す */
+function coreColor(amber: number, out: THREE.Color): THREE.Color {
+  return amber > 0 ? out.copy(_comm).lerp(_amber, Math.min(1, amber)) : out.copy(_comm)
+}
+
+/** 0〜1 に収める（数でなければ既定の値） */
+const unit = (v: number, fallback: number) => (Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : fallback)
 
 /** リングの中心 */
 const RING_Y = BASE_STATION_RING_Y
@@ -163,7 +188,9 @@ function rings(b: Build) {
   const tickGlow = glowMaterial(PALETTE.cyan, 1.1)
   // 内側リングの目盛りは、リングの前の面とぴったり同じ深さ（z = 0.060）。作る順によらず面より手前に描く
   const tickOverlay = overlayGlowMaterial(PALETTE.cyan, 1.1)
-  const segGlow = glowMaterial(PALETTE.cyan, 2.2)
+  // 区切りの表示灯は琥珀の混ぜ具合（amber）で色を変えるので、キャッシュの発光の素材の写しを持つ（既定の色は同じ）
+  const SEG_GLOW = 2.2
+  const segGlow = b.own.add(glowMaterial(PALETTE.cyan, SEG_GLOW).clone())
 
   // 外周リング前面の区切りライト（24 個）
   const segLights = radialMatrices(24, 1.835, 0.175, [1, 1, 1], Math.PI / 24).map((m) => {
@@ -228,6 +255,7 @@ function rings(b: Build) {
   // 回るリング（動かない物を合わせるときの体。world/staticMerge.ts）
   markDynamic(middle, inner, gimbal)
 
+  let segAmber = 0
   return {
     object,
     update(dt: number) {
@@ -237,6 +265,12 @@ function rings(b: Build) {
       middle.rotation.z -= dt * 0.12 * boost
       inner.rotation.z += dt * 0.2 * boost
       gimbal.rotation.y += dt * 0.35 * boost
+      // 外周の区切りの表示灯: 琥珀の混ぜ具合で、シアンから琥珀へ（変わったときだけ書く）
+      const amber = unit(b.ch.amber, 0)
+      if (amber !== segAmber) {
+        segAmber = amber
+        segGlow.color.copy(_cyan).lerp(_amber, amber).multiplyScalar(SEG_GLOW)
+      }
     },
   }
 }
@@ -245,8 +279,10 @@ function rings(b: Build) {
 function core(b: Build) {
   const { mats, own } = b
   const coreMat = own.add(glowMaterial(PALETTE.comm, GLOW.core).clone())
-  const commGlow = glowMaterial(PALETTE.comm, GLOW.strong)
-  const commSoft = glowMaterial(PALETTE.comm, GLOW.strip)
+  // まわりの緑の線（エネルギーリング・支柱とハウジングの線）は、コアの明るさ（core）と琥珀の混ぜ具合（amber）で変えるので、
+  // キャッシュの発光の素材の写しを持つ（既定の色は同じ）
+  const commGlow = own.add(glowMaterial(PALETTE.comm, GLOW.strong).clone())
+  const commSoft = own.add(glowMaterial(PALETTE.comm, GLOW.strip).clone())
   const glassShell = own.add(
     new THREE.MeshPhysicalMaterial({
       color: '#0a1a12',
@@ -258,15 +294,17 @@ function core(b: Build) {
       clearcoat: 1,
     }),
   )
+  const HOLO_INTENSITY = 1.2
+  const holo = own.add(
+    new HologramMaterial({ color: PALETTE.comm, intensity: HOLO_INTENSITY, base: 0.0, fresnelStrength: 1, fresnelPower: 3, scanDensity: 200, sweep: 0.2, flicker: 0.1 }),
+  )
   // ガラスの球と光る球を 1 つの物にまとめる。まとまりの順（CORE_SHELL_ORDER）= 描く順
   const shell = (() => {
     const parts = {
       glass: { radius: 0.34, material: glassShell },
       hologram: {
         radius: 0.37,
-        material: own.add(
-          new HologramMaterial({ color: PALETTE.comm, intensity: 1.2, base: 0.0, fresnelStrength: 1, fresnelPower: 3, scanDensity: 200, sweep: 0.2, flicker: 0.1 }),
-        ),
+        material: holo,
       },
     }
     const spheres = CORE_SHELL_ORDER.map((k) => new THREE.SphereGeometry(parts[k].radius, 48, 32))
@@ -317,9 +355,24 @@ function core(b: Build) {
   const energyRings = object.children[object.children.length - 1]!
   // 脈打つコアと回るエネルギーリング（動く物）
   markDynamic(coreMesh, ...energyRings.children)
-  const sprite = glowSprite({ position: [0, 0, 0.3], size: 1.7, color: PALETTE.comm, opacity: 0.38 })
-  own.mesh(sprite.inner.children[0] as THREE.Mesh)
+  const SPRITE_OPACITY = 0.38
+  const sprite = glowSprite({ position: [0, 0, 0.3], size: 1.7, color: PALETTE.comm, opacity: SPRITE_OPACITY })
+  const spriteMesh = own.mesh(sprite.inner.children[0] as THREE.Mesh)
+  const spriteMat = spriteMesh.material as THREE.MeshBasicMaterial
   object.add(sprite.object)
+  // まわりの物の明るさと色（コアの明るさ・琥珀の混ぜ具合が変わったときだけ書く。既定の 1・0 では作ったときのまま）
+  let lit = { core: 1, amber: 0 }
+  const relight = (level: number, amber: number) => {
+    if (level === lit.core && amber === lit.amber) return
+    lit = { core: level, amber }
+    const c = coreColor(amber, _c)
+    commGlow.color.copy(c).multiplyScalar(GLOW.strong * level)
+    commSoft.color.copy(c).multiplyScalar(GLOW.strip * level)
+    holo.color = c
+    holo.intensity = HOLO_INTENSITY * level
+    spriteMat.color.copy(c)
+    spriteMat.opacity = SPRITE_OPACITY * level
+  }
 
   return {
     object,
@@ -327,8 +380,11 @@ function core(b: Build) {
     sprite,
     update(dt: number, t: number) {
       const pulse = 1 + Math.sin(t * 1.3) * 0.12 + Math.max(0, Math.sin(t * 0.45)) ** 16 * 0.6
-      // 通信リンクが確立すると少し明るくなり、確立の瞬間にフラッシュする
-      coreMat.color.set(PALETTE.comm).multiplyScalar(GLOW.core * pulse * (1 + b.ch.link * 0.35 + b.ch.flash * 1.6 + b.ch.pulse * 1.4))
+      // 通信リンクが確立すると少し明るくなり、確立の瞬間にフラッシュする。コアの明るさ（core）を掛け、色は琥珀の混ぜ具合（amber）で
+      const level = unit(b.ch.core, 1)
+      const amber = unit(b.ch.amber, 0)
+      coreColor(amber, coreMat.color).multiplyScalar(GLOW.core * pulse * (1 + b.ch.link * 0.35 + b.ch.flash * 1.6 + b.ch.pulse * 1.4) * level)
+      relight(level, amber)
       coreMesh.scale.setScalar(1 + Math.sin(t * 1.3) * 0.02)
       const [a, c1, c] = energyRings.children as [THREE.Object3D, THREE.Object3D, THREE.Object3D]
       a.rotation.x += 0.9 * dt

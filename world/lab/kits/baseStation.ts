@@ -59,7 +59,7 @@ export interface BaseStationChannels {
    */
   core: number
   /**
-   * 琥珀の混ぜ具合（0〜1。既定 0 = 今の色）。コアの緑（PALETTE.comm）と外周リングの表示灯（区切りの表示灯 24 個と縁の光の線。PALETTE.cyan）の色を、
+   * 琥珀の混ぜ具合（0〜1。既定 0 = 今の色）。コアの緑（PALETTE.comm）と外周リングの表示灯（区切りの表示灯 24 個と縁の光の線。PALETTE.cyan。中間リングのエミッタ 12 個。PALETTE.blue）の色を、
    * 琥珀（PALETTE.amber）へ寄せる（外周の表示灯は白く飛ばないよう、琥珀のぶん少し暗く）。照明のコアの光の色も同じ。設定の LOST（消灯し、外周の表示灯が琥珀色）は core 0・amber 1
    */
   amber: number
@@ -69,6 +69,7 @@ export const BASE_STATION_CHANNELS: Readonly<BaseStationChannels> = { ring: 0, r
 
 const _comm = new THREE.Color(PALETTE.comm)
 const _cyan = new THREE.Color(PALETTE.cyan)
+const _blue = new THREE.Color(PALETTE.blue)
 const _amber = new THREE.Color(PALETTE.amber)
 const _c = new THREE.Color()
 
@@ -185,9 +186,10 @@ function rings(b: Build) {
     segLight: geo(b, new THREE.BoxGeometry(0.12, 0.01, 0.01)),
   }
 
-  // 外周リングの縁の光の線と区切りの表示灯は、琥珀の混ぜ具合（amber）で色を変えるので、キャッシュの発光の素材の写しを持つ（既定の色は同じ）
+  // 外周リングの縁の光の線・区切りの表示灯・中間リングのエミッタは、琥珀の混ぜ具合（amber）で色を変えるので、キャッシュの発光の素材の写しを持つ（既定の色は同じ）
   const lipGlow = b.own.add(glowMaterial(PALETTE.cyan, GLOW.strong).clone())
-  const nodeGlow = glowMaterial(PALETTE.blue, 2.6)
+  const NODE_GLOW = 2.6
+  const nodeGlow = b.own.add(glowMaterial(PALETTE.blue, NODE_GLOW).clone())
   // 配信カメラでは頭の後ろを通るので、にじまない程度に抑える
   const tickGlow = glowMaterial(PALETTE.cyan, 1.1)
   // 内側リングの目盛りは、リングの前の面とぴったり同じ深さ（z = 0.060）。作る順によらず面より手前に描く
@@ -268,7 +270,7 @@ function rings(b: Build) {
       middle.rotation.z -= dt * 0.12 * boost
       inner.rotation.z += dt * 0.2 * boost
       gimbal.rotation.y += dt * 0.35 * boost
-      // 外周の表示灯（区切りの表示灯と縁の光の線）: 琥珀の混ぜ具合で、シアンから琥珀へ（変わったときだけ書く）。
+      // 外周の表示灯（区切りの表示灯・縁の光の線・中間リングのエミッタ 12 個）: 琥珀の混ぜ具合で、シアンから琥珀へ（変わったときだけ書く）。
       // 琥珀は明るいと白く飛んで琥珀に見えないので、琥珀のぶん明るさを落とす（琥珀 1 で 0.55 倍）
       const amber = unit(b.ch.amber, 0)
       if (amber !== segAmber) {
@@ -276,6 +278,7 @@ function rings(b: Build) {
         const dim = 1 - AMBER_DIM * amber
         segGlow.color.copy(_cyan).lerp(_amber, amber).multiplyScalar(SEG_GLOW * dim)
         lipGlow.color.copy(_cyan).lerp(_amber, amber).multiplyScalar(GLOW.strong * dim)
+        nodeGlow.color.copy(_blue).lerp(_amber, amber).multiplyScalar(NODE_GLOW * dim)
       }
     },
   }

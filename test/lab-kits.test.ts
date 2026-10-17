@@ -582,6 +582,8 @@ describe('基地局のキット（4-6）', () => {
     for (let i = 0; i < 3; i++) expect(seg.color.toArray()[i]!).toBeCloseTo(amber.toArray()[i]! * 2.2 * 0.55, 12)
     const lip = ((ring.children[2] as THREE.Mesh).material as THREE.MeshBasicMaterial).color
     for (let i = 0; i < 3; i++) expect(lip.toArray()[i]!).toBeCloseTo(amber.toArray()[i]! * GLOW.strong! * 0.55, 12)
+    const node = ((ring.children[5]!.children[2] as THREE.InstancedMesh).material as THREE.MeshBasicMaterial).color
+    for (let i = 0; i < 3; i++) expect(node.toArray()[i]!).toBeCloseTo(amber.toArray()[i]! * 2.6 * 0.55, 12)
     expect(coreLight.color.getHexString()).toBe(amber.getHexString())
     // 範囲の外・数でない値は収める（明るさは既定の 1 に）
     fx.core = Number.NaN
@@ -673,9 +675,9 @@ describe('基地局のキット（4-6）', () => {
     // 共有の素材は捨てない
     expect([...usedMaterials].filter((m) => shared.has(m) && disposed.has(m))).toEqual([])
     // キャッシュの発光の素材（glowMaterial・overlayGlowMaterial）は捨てない。捨てる MeshBasicMaterial はコアの光る芯（clone）・にじみの板と、
-    // コアの明るさ・琥珀の混ぜ具合で変える写し（外周の縁の光の線・区切りの表示灯・まわりの緑の線 2 つ）の 6 つだけ
+    // コアの明るさ・琥珀の混ぜ具合で変える写し（外周の縁の光の線・区切りの表示灯・中間リングのエミッタ・まわりの緑の線 2 つ）の 7 つだけ
     const basics = [...usedMaterials].filter((m) => (m as THREE.MeshBasicMaterial).isMeshBasicMaterial)
-    expect(basics.filter((m) => disposed.has(m)).length).toBe(6)
+    expect(basics.filter((m) => disposed.has(m)).length).toBe(7)
     // そのほかの素材（画面・危険線・ガラスの球・光る球・流れる光の芯・ステッカー・グレーチング）は捨てる
     expect([...usedMaterials].filter((m) => !shared.has(m) && !(m as THREE.MeshBasicMaterial).isMeshBasicMaterial && !disposed.has(m))).toEqual([])
   })

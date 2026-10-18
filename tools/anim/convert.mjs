@@ -1076,7 +1076,14 @@ const round = (x) => Math.round(x * 10000) / 10000
 /** T ポーズでの左脚の長さ（太もも + すね） */
 const legLength = (tpose) => tpose.pos.leftLowerLeg.distanceTo(tpose.pos.leftUpperLeg) + tpose.pos.leftFoot.distanceTo(tpose.pos.leftLowerLeg)
 
-function writeVrma(path, { name, rig, tpose, anim }, copyright, generator) {
+/**
+ * 骨の回転と腰の位置の列を .vrma に書き出す（convertAnimations の中で使う。使う側の道具が自分で作った動き（キーポーズを補間した物など）を書き出すのにも使える）。
+ * - rig: { bones: VRM の骨の名前の並び（親が先）, parent: 骨 → 親の骨の名前（hips は null） }
+ * - tpose: { pos: 骨 → T ポーズでのワールドの位置（Vector3。骨組みはこの位置に回転なしで置く。腰の高さが再生するモデルとの大きさの比の基準） }
+ * - anim: { times: 秒の並び, rotations: 骨 → 時刻ごとの正規化した骨のローカルの回転（Quaternion）, hips: 時刻ごとの腰の位置（Vector3）, walkSpeed: null か歩きの速さ }
+ * - copyright: glTF の asset.copyright（無ければ書かない）。generator: asset.generator
+ */
+export function writeVrma(path, { name, rig, tpose, anim }, copyright, generator) {
   const { bones, parent } = rig
   const chunks = []
   let byteLength = 0

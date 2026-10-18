@@ -35,6 +35,8 @@ await convertAnimations({
 })
 ```
 
+自分で作った動き（キーポーズを補間した骨の回転と腰の位置の列など）は、同じ所の `writeVrma(path, { name, rig, tpose, anim }, copyright, generator)` で `.vrma` に書き出せる（引数の形は関数のコメント。stream-video の `scripts/sync-keyposes.mjs` が使う）。
+
 作る物の形（`clip`・`loop`・`gesture`）と置き換えの決まりは `tools/anim/convert.mjs` のコメント。作った `.vrma` の出典（素材とライセンス）は、書き出した所に使う側が書く。
 
 素材の形ごとの決まり:

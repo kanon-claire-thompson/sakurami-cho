@@ -583,39 +583,44 @@ export function applyWave(p: BodyPose, w: number, ph: number, seated = 0) {
 }
 
 
-/** 両手を上げて跳ねる（最大の演出）。w は強さ、ct は始まってからの秒 */
+/**
+ * 喜ぶ（両手を突き上げて弾む）。w は強さ、ct は始まってからの秒（3.4 秒の身ぶり）。
+ * 拳を胸の前に引き寄せてから、体の前を通して真上へ突き上げる（2 回）。腕は前へ上げ、横へは張らない（シルエットを体の幅に収める）。
+ * 最後に両手を胸の前で握って締める。弾みは小さく（座っている・乗り物の中でも使うので、体の上下と膝は少しだけ足す）。
+ * 立っているときの全身の喜ぶは、使う側が .vrma で見せてもよい（花音は stream-video の自作のキーポーズ）
+ */
 export function applyCheer(p: BodyPose, w: number, ct: number) {
   if (w <= 0.001) return p
   const L = THREE.MathUtils.lerp
-  const shake = Math.sin(ct * 13) * 0.12
-  for (const [a, sd] of [
-    [p.armL, 1],
-    [p.armR, -1],
-  ] as const) {
-    a.raise = L(a.raise, 0.35, w)
-    a.out = L(a.out, 2.7 + shake * sd, w)
+  // 突き上げる強さ（0 = 拳を胸の前、1 = 真上）。0.55〜0.75 秒と 1.5〜1.7 秒に上げ、1.25 秒と 2.2 秒から下ろす
+  const up = smoothstep(ct, 0.55, 0.75) * (1 - smoothstep(ct, 1.25, 1.45)) + smoothstep(ct, 1.5, 1.7) * (1 - smoothstep(ct, 2.2, 2.42))
+  for (const a of [p.armL, p.armR]) {
+    a.raise = L(a.raise, L(0.45, 2.75, up), w)
+    a.out = L(a.out, 0.06 + 0.06 * up, w)
     a.twist = L(a.twist, 0, w)
-    a.elbow = L(a.elbow, 0.25, w)
+    a.elbow = L(a.elbow, L(2.3, 0.25, up), w)
     a.elbowSide = L(a.elbowSide, 0, w)
   }
-  lerpHand(p.handL, HANDS.open, w)
-  lerpHand(p.handR, HANDS.open, w)
-  // 3 回跳ねる（しゃがんでから跳ぶ）
-  const hopT = ct - 0.2
+  lerpHand(p.handL, HANDS.fist, w)
+  lerpHand(p.handR, HANDS.fist, w)
+  // 2 回弾む（踏み切りの前に少し沈む）。高さは控えめ
   let hop = 0
   let crouch = 0
-  if (hopT > 0 && hopT < 2.1) {
-    const k = (hopT % 0.7) / 0.7
-    hop = Math.max(0, Math.sin(k * Math.PI)) * 0.14
-    crouch = k > 0.85 || k < 0.08 ? 0.35 : 0
+  for (const t0 of [0.7, 1.62]) {
+    const k = (ct - t0) / 0.24
+    if (k > 0 && k < 1) hop = Math.sin(k * Math.PI) * 0.05
+    crouch += Math.max(0, 1 - Math.abs(ct - (t0 - 0.15)) / 0.15) * 0.25 + Math.max(0, 1 - Math.abs(ct - (t0 + 0.38)) / 0.15) * 0.2
   }
   p.bob += hop * w
-  p.kneeL = L(p.kneeL, crouch, w)
-  p.kneeR = L(p.kneeR, crouch, w)
-  p.thighL = L(p.thighL, crouch * 0.5, w)
-  p.thighR = L(p.thighR, crouch * 0.5, w)
-  p.headPitch = L(p.headPitch, -0.12, w)
-  p.lean = L(p.lean, -0.05, w)
+  p.kneeL += crouch * w
+  p.kneeR += crouch * w
+  p.thighL += crouch * 0.5 * w
+  p.thighR += crouch * 0.5 * w
+  // 頭は 1 回目に左、2 回目に右へ小さく傾ける。上半身は少し前へ（反らせない）
+  const roll = 0.1 * (smoothstep(ct, 0.5, 0.8) * (1 - smoothstep(ct, 1.2, 1.45)) - smoothstep(ct, 1.45, 1.7) * (1 - smoothstep(ct, 2.1, 2.4)))
+  p.headRoll = L(p.headRoll, roll, w)
+  p.headPitch = L(p.headPitch, 0.04, w)
+  p.lean = L(p.lean, 0.06, w)
   return p
 }
 

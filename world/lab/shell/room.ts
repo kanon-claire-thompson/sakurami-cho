@@ -36,7 +36,7 @@ const PILLAR_IN = HW - 0.4
 
 /** 床の目地（カッター目地）と吹き付けのマーキング */
 function floorDetails(): THREE.Group {
-  const seamMat = new THREE.MeshStandardMaterial({ color: '#030405', roughness: 0.95, metalness: 0, polygonOffset: true, polygonOffsetFactor: -1 })
+  const seamMat = new THREE.MeshStandardMaterial({ name: 'floorSeam', color: '#030405', roughness: 0.95, metalness: 0, polygonOffset: true, polygonOffsetFactor: -1 })
   const stencil = floorStencilTexture(['SAKURAGI-OKA'], 'south-floor')
   // 奥行きを 3 つに割る横の目地と、x = ±4 の縦の目地
   const seams: { pos: Vec3; size: [number, number] }[] = [
@@ -51,6 +51,7 @@ function floorDetails(): THREE.Group {
     mesh(
       new THREE.PlaneGeometry(3.2, 1.6),
       new THREE.MeshStandardMaterial({
+        name: 'floorStencil',
         map: stencil,
         color: '#9aa3ad',
         transparent: true,
@@ -157,7 +158,7 @@ function glassBand(b: ShellBuild, { x0, x1, y0, y1, mullionSpacing = 1.2 }: Glas
 
 /** 壁の後ろの暗い下地（パネルの目地から見える部分。壁ごとに素材を 1 つ） */
 export function wallBacking(x0: number, x1: number, y0: number = 0, y1: number = H): THREE.Mesh {
-  const mat = new THREE.MeshStandardMaterial({ color: '#030406', roughness: 0.9, metalness: 0.2 })
+  const mat = new THREE.MeshStandardMaterial({ name: 'wallBacking', color: '#030406', roughness: 0.9, metalness: 0.2 })
   return mesh(new THREE.PlaneGeometry(x1 - x0, y1 - y0), mat, { p: [(x0 + x1) / 2, (y0 + y1) / 2, -0.005] })
 }
 
@@ -307,7 +308,7 @@ const LINE_LIGHT_Y = CEILING_LIGHTS.lineY
 function ceiling(b: ShellBuild): THREE.Group {
   const mats = b.mats
   const trayMat = perforated(b, 1.4, 40)
-  const ceilingMat = new THREE.MeshStandardMaterial({ color: '#07090c', roughness: 0.85, metalness: 0.3 })
+  const ceilingMat = new THREE.MeshStandardMaterial({ name: 'ceiling', color: '#07090c', roughness: 0.85, metalness: 0.3 })
   // 梁はほぼ 3m ごと（奥行きを等分して、奥行きの中心に対して対称に）
   const beamCount = Math.round(ROOM.depth / 3)
   const beamZ = Array.from({ length: beamCount }, (_, i) => CZ + (i - (beamCount - 1) / 2) * (ROOM.depth / beamCount))

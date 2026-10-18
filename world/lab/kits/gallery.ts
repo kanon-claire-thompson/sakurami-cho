@@ -119,7 +119,7 @@ function archivePanel(b: Build, panel: GalleryPanel): THREE.Mesh {
   return m(
     b,
     new THREE.PlaneGeometry(2.4, 0.6),
-    b.own.add(new THREE.MeshStandardMaterial({ color: '#000', emissive: '#ffffff', emissiveMap: tex, emissiveIntensity: 1.15, roughness: 0.3, toneMapped: false })),
+    b.own.add(new THREE.MeshStandardMaterial({ name: 'galleryScreen', color: '#000', emissive: '#ffffff', emissiveMap: tex, emissiveIntensity: 1.15, roughness: 0.3, toneMapped: false })),
     { p: [0, 2.4, WALL_PANEL_DEPTH + 0.02] },
   )
 }

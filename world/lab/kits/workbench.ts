@@ -85,6 +85,7 @@ const screenMaterial = (b: Build, screen: LabScreen, emissiveIntensity: number, 
   mat(
     b,
     new THREE.MeshStandardMaterial({
+      name: 'benchScreen',
       color: '#000',
       emissive: '#fff',
       emissiveMap: screen.texture,
@@ -105,7 +106,7 @@ function workbench(b: Build, position: Vec3) {
   const lampRing = glowMaterial('#eef6ff', GLOW.strong)
   const W = 2.0
   const D = 0.8
-  const matMat = mat(b, new THREE.MeshStandardMaterial({ color: '#10243d', roughness: 0.85 }))
+  const matMat = mat(b, new THREE.MeshStandardMaterial({ name: 'cuttingMat', color: '#10243d', roughness: 0.85 }))
 
   const object = group(
     [
@@ -207,7 +208,7 @@ function workbench(b: Build, position: Vec3) {
 /** 組み立ての場所の小さなマット（作業台のローカル。縁が光る） */
 function assemblyMat(b: Build): THREE.Group {
   const [x, z] = ASSEMBLY_SPOT_LOCAL
-  const matMat = mat(b, new THREE.MeshStandardMaterial({ color: '#0b1a2c', roughness: 0.9 }))
+  const matMat = mat(b, new THREE.MeshStandardMaterial({ name: 'assemblyMat', color: '#0b1a2c', roughness: 0.9 }))
   const edge = glowMaterial(PALETTE.cyan, 1.4)
   return group(
     [

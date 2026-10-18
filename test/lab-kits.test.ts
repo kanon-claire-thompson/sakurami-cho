@@ -133,7 +133,7 @@ interface Lab {
   placements: readonly Placement[]
   kits: { object: THREE.Group; list: readonly Kit[]; get(id: string): Kit | undefined; update(dt: number, f: Frame): void }
   lighting: { object: THREE.Group; channels: { baseStation: Record<string, number> }; update(dt: number, f: { time: number }): void }
-  shell: { object: THREE.Group }
+  shell: { object: THREE.Group; floor: { reflection: boolean } }
   atmosphere: { object: THREE.Group }
   dispose(): void
 }
@@ -152,6 +152,7 @@ interface Host {
   channels: Record<string, object | undefined>
   slots: Record<string, (() => { object: THREE.Object3D }) | undefined>
   screens?: Record<string, Draw | undefined>
+  floorReflection?: boolean
 }
 interface PlanMod {
   BASE_STATION_RING_Y: number
@@ -287,6 +288,26 @@ describe('ラボの什器のキットの口（4-5）', () => {
     without.dispose()
 
     await expect(makeLab([{ id: 'x', kit: '無い種類', at: { position: [0, 0, 0], rotationY: 0 } }])).rejects.toThrow('キットの種類が無い')
+  })
+
+  test('ラボの光を受ける素材（PBR）には、どれも名前が付いている（使う側が配色の表を名前で引けるように）。床の映り込みはラボの口の floorReflection で止められる', async () => {
+    const lab = await makeLab()
+    const unnamed = new Set<string>()
+    for (const root of [lab.shell.object, lab.kits.object]) {
+      root.traverse((o) => {
+        const mesh = o as THREE.Mesh
+        if (!mesh.isMesh) return
+        for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+          if ((m as THREE.MeshStandardMaterial).isMeshStandardMaterial && !m.name) unnamed.add(`${mesh.name || mesh.parent?.name || '?'}:${(m as THREE.MeshStandardMaterial).color.getHexString()}`)
+        }
+      })
+    }
+    expect([...unnamed]).toEqual([])
+    expect(lab.shell.floor.reflection).toBe(true)
+    lab.dispose()
+    const off = await makeLab(undefined, { ...emptyHost(), floorReflection: false })
+    expect(off.shell.floor.reflection).toBe(false)
+    off.dispose()
   })
 
   test('createLab: キットの入力の値と差し込み口の中身はラボの口から。アンカーと障害物は plan のまま', async () => {

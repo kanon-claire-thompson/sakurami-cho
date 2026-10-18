@@ -33,8 +33,8 @@ export function createWindowPlants(at: Placement, opts: WindowPlantsOpts | undef
   const plants = opts ?? WINDOW_PLANTS
   const mats = ctx.materials
   const own = createOwned()
-  const leafMat = own.add(new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.62, metalness: 0, side: THREE.DoubleSide }))
-  const soilMat = own.add(new THREE.MeshStandardMaterial({ color: '#1c1712', roughness: 1, metalness: 0 }))
+  const leafMat = own.add(new THREE.MeshStandardMaterial({ name: 'leaf', color: '#ffffff', roughness: 0.62, metalness: 0, side: THREE.DoubleSide }))
+  const soilMat = own.add(new THREE.MeshStandardMaterial({ name: 'pottingSoil', color: '#1c1712', roughness: 1, metalness: 0 }))
 
   const rnd = mulberry32(4804)
   const pots: InstanceItem[] = []

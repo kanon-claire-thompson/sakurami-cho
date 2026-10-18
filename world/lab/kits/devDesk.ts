@@ -92,6 +92,7 @@ function curvedMonitor(b: Build, name: string, { position, rotationY = 0, width,
         mat(
           b,
           new THREE.MeshStandardMaterial({
+            name: 'monitorScreen',
             color: '#000000',
             emissive: '#ffffff',
             emissiveMap: screen.texture,
@@ -168,7 +169,7 @@ function keyboard(b: Build, position: Vec3, rotationY = 0): THREE.Group {
   // スペースキー
   keys.push(new THREE.Matrix4().compose(new THREE.Vector3(0, 0.018, 0.078), new THREE.Quaternion(), new THREE.Vector3(6, 1, 1)))
   const keyGeom = own.add(new THREE.BoxGeometry(0.024, 0.012, 0.023))
-  const keyMat = mat(b, new THREE.MeshStandardMaterial({ color: '#1a1e24', roughness: 0.6 }))
+  const keyMat = mat(b, new THREE.MeshStandardMaterial({ name: 'keycap', color: '#1a1e24', roughness: 0.6 }))
   const backlight = glowMaterial(PALETTE.cyan, 1.1)
   return group(
     [
@@ -183,7 +184,7 @@ function keyboard(b: Build, position: Vec3, rotationY = 0): THREE.Group {
 
 function chair(b: Build, position: Vec3, rotationY = 0): THREE.Group {
   const { mats } = b
-  const fabric = mat(b, new THREE.MeshStandardMaterial({ color: '#15191f', roughness: 0.9 }))
+  const fabric = mat(b, new THREE.MeshStandardMaterial({ name: 'chairFabric', color: '#15191f', roughness: 0.9 }))
   const stripe = glowMaterial(PALETTE.blue, 1.4)
   return group(
     [
@@ -215,7 +216,7 @@ function chair(b: Build, position: Vec3, rotationY = 0): THREE.Group {
 /** 花音のヘッドホン（スタンドに掛けてある） */
 function headphoneStand(b: Build, position: Vec3): THREE.Group {
   const { mats } = b
-  const blue = mat(b, new THREE.MeshStandardMaterial({ color: '#1f4fa6', roughness: 0.45, metalness: 0.2 }))
+  const blue = mat(b, new THREE.MeshStandardMaterial({ name: 'headphoneBlue', color: '#1f4fa6', roughness: 0.45, metalness: 0.2 }))
   return group(
     [
       m(b, new THREE.CylinderGeometry(0.07, 0.08, 0.02, 24), mats.darkMetal, { p: [0, 0.01, 0] }),
@@ -261,7 +262,7 @@ export function createDevDesk(at: Placement, _opts: object | undefined, ctx: Lab
   const wingX = (WING.x0 + WING.x1) / 2
   const wingW = WING.x1 - WING.x0
   // 前の DevDesk の hooks の素材と、JSX の値で引いていた発光の素材（天板の縁の光）
-  const mug = mat(b, new THREE.MeshStandardMaterial({ color: '#e9edf1', roughness: 0.35 }))
+  const mug = mat(b, new THREE.MeshStandardMaterial({ name: 'mugCeramic', color: '#e9edf1', roughness: 0.35 }))
   const strip = glowMaterial(PALETTE.blue, GLOW.strip)
 
   // 作る順は前の JSX のまま（置き場所の群の中: 天板・脚・短辺・短辺のモニタ・モニタの群・ヘッドホン・PC・椅子・配線）
@@ -307,7 +308,7 @@ export function createDevDesk(at: Placement, _opts: object | undefined, ctx: Lab
   row.push(...panels.map((p) => p.object))
   // 机の上
   row.push(
-    m(b, new THREE.PlaneGeometry(0.9, 0.36), mat(b, new THREE.MeshStandardMaterial({ color: '#0b0f15', roughness: 0.9 })), {
+    m(b, new THREE.PlaneGeometry(0.9, 0.36), mat(b, new THREE.MeshStandardMaterial({ name: 'deskMat', color: '#0b0f15', roughness: 0.9 })), {
       p: [0.05, DESK_H + 0.002, deskFront - 0.24],
       r: [-Math.PI / 2, 0, 0],
       receive: true,

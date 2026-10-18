@@ -294,6 +294,7 @@ function core(b: Build) {
   const commSoft = own.add(glowMaterial(PALETTE.comm, GLOW.strip).clone())
   const glassShell = own.add(
     new THREE.MeshPhysicalMaterial({
+      name: 'coreGlassShell',
       color: '#0a1a12',
       roughness: 0.05,
       metalness: 0,
@@ -435,7 +436,7 @@ function pylon(b: Build, side: -1 | 1, idle: ScreenDraw) {
   // ステータス画面（通信状態なのでグリーン）
   const screenGeom = geo(b, new THREE.PlaneGeometry(0.52, 0.39))
   const screenMat = own.add(
-    new THREE.MeshStandardMaterial({ color: '#000', emissive: '#ffffff', emissiveMap: screen.texture, emissiveIntensity: 1.15, roughness: 0.2, toneMapped: false }),
+    new THREE.MeshStandardMaterial({ name: 'pillarScreen', color: '#000', emissive: '#ffffff', emissiveMap: screen.texture, emissiveIntensity: 1.15, roughness: 0.2, toneMapped: false }),
   )
   children.push(mesh(screenGeom, screenMat, { p: [x, 1.3, front + 0.032] }))
   children.push(
@@ -638,7 +639,7 @@ function floorCables(b: Build): THREE.Group {
  */
 function dangerLine(b: Build): THREE.InstancedMesh {
   const paint = b.own.add(
-    new THREE.MeshStandardMaterial({ color: '#e8b923', roughness: 0.7, metalness: 0, emissive: '#e8b923', emissiveIntensity: 0.08, polygonOffset: true, polygonOffsetFactor: -2 }),
+    new THREE.MeshStandardMaterial({ name: 'dangerLine', color: '#e8b923', roughness: 0.7, metalness: 0, emissive: '#e8b923', emissiveIntensity: 0.08, polygonOffset: true, polygonOffsetFactor: -2 }),
   )
   const r = rectOf('危険線（黄色の破線）')
   const dashes: THREE.Matrix4[] = []

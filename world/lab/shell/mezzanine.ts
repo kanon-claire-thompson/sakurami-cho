@@ -87,8 +87,8 @@ function mezzanineShell(b: ShellBuild): THREE.Group {
   const edgeLine = dimmableGlowMaterial(PALETTE.cyan, 2.4, 0.3)
   const railLine = dimmableGlowMaterial(PALETTE.blue, 1.8, 0.3)
   const cove = dimmableGlowMaterial('#d8ecff', 2.2, 0.35)
-  const floorMat = new THREE.MeshStandardMaterial({ color: '#0b0e12', roughness: 0.38, metalness: 0.25 })
-  const ceilingMat = new THREE.MeshStandardMaterial({ color: '#07090c', roughness: 0.85, metalness: 0.3 })
+  const floorMat = new THREE.MeshStandardMaterial({ name: 'mezzanineFloor', color: '#0b0e12', roughness: 0.38, metalness: 0.25 })
+  const ceilingMat = new THREE.MeshStandardMaterial({ name: 'ceiling', color: '#07090c', roughness: 0.85, metalness: 0.3 })
   const floorWash = wallWash(b)
   const topWash = wallWash(b, TOP_WASH)
 
@@ -165,7 +165,7 @@ function mezzanineShell(b: ShellBuild): THREE.Group {
 /** 西の中二階: 仮眠用のソファベッドと、ひらきボードの額 */
 function napCorner(b: ShellBuild): THREE.Group {
   const mats = b.mats
-  const fabric = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.92, metalness: 0 })
+  const fabric = new THREE.MeshStandardMaterial({ name: 'sofaFabric', color: '#ffffff', roughness: 0.92, metalness: 0 })
   const frameTex = hirakiBoardFrameTexture()
   const lamp = keep(b, glowMaterial('#dcecff', 1.15))
   const pictureLight = dimmableGlowMaterial('#e6f1ff', 1.5, 0.5)
@@ -211,7 +211,7 @@ function napCorner(b: ShellBuild): THREE.Group {
     mesh(new THREE.CylinderGeometry(0.012, 0.03, 0.24, 8), mats.steel, { p: [tx, FY + 0.4, tz] }),
     mesh(LAMP_SHADE, lamp, { p: [tx, FY + 0.56, tz], s: [0.1, 0.12, 0.1] }),
     // ひらきボードの額の中身とガラス、額を照らす明かり
-    mesh(new THREE.PlaneGeometry(0.64, 0.48), new THREE.MeshStandardMaterial({ map: frameTex, roughness: 0.7, metalness: 0 }), { p: [sx, fy, fz + 0.021] }),
+    mesh(new THREE.PlaneGeometry(0.64, 0.48), new THREE.MeshStandardMaterial({ name: 'framedPicture', map: frameTex, roughness: 0.7, metalness: 0 }), { p: [sx, fy, fz + 0.021] }),
     mesh(new THREE.PlaneGeometry(0.64, 0.48), mats.glass, { p: [sx, fy, fz + 0.026] }),
     mesh(new THREE.BoxGeometry(0.34, 0.004, 0.02), pictureLight, { p: [sx, fy + 0.342, fz + 0.08] }),
   ])
@@ -220,7 +220,7 @@ function napCorner(b: ShellBuild): THREE.Group {
 /** 東の中二階: 資料庫の棚（ファイル・箱・本）と脚立 */
 function archiveCorner(b: ShellBuild): THREE.Group {
   const mats = b.mats
-  const paper = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.8, metalness: 0 })
+  const paper = new THREE.MeshStandardMaterial({ name: 'archivePaper', color: '#ffffff', roughness: 0.8, metalness: 0 })
   const unitXs = [4.35, 5.45, 6.55]
   const UW = 1.0
   const UH = 2.3

@@ -161,7 +161,7 @@ export function sticker(o: StickerOptions): THREE.Mesh {
           polygonOffset: true,
           polygonOffsetFactor: -2,
         })
-      : new THREE.MeshStandardMaterial({ map: texture, transparent: true, roughness: 0.55, metalness: 0, polygonOffset: true, polygonOffsetFactor: -2 })
+      : new THREE.MeshStandardMaterial({ name: 'sticker', map: texture, transparent: true, roughness: 0.55, metalness: 0, polygonOffset: true, polygonOffsetFactor: -2 })
   return mesh(new THREE.PlaneGeometry(o.width, o.width / look.aspect), material, { p: o.position, r: o.rotation })
 }
 
@@ -192,6 +192,7 @@ export function stickyNoteTexture(lines: readonly string[], color: string): THRE
 export function stickyNote(o: StickyNoteOptions): THREE.Mesh {
   const size = o.size ?? 0.075
   const material = new THREE.MeshStandardMaterial({
+    name: 'stickyNote',
     map: stickyNoteTexture(o.lines, o.color ?? '#f3e79b'),
     roughness: 0.8,
     polygonOffset: true,

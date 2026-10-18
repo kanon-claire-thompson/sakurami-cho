@@ -45,7 +45,7 @@ const STAFF = { z: (ENTRANCE.staffDoor.z[0] + ENTRANCE.staffDoor.z[1]) / 2, w: E
  */
 function doors(b: ShellBuild): THREE.Group {
   const mats = b.mats
-  const visionGlass = new THREE.MeshStandardMaterial({ color: '#06090d', metalness: 0.3, roughness: 0.08 })
+  const visionGlass = new THREE.MeshStandardMaterial({ name: 'visionGlass', color: '#06090d', metalness: 0.3, roughness: 0.08 })
   const jambLine = dimmableGlowMaterial(PALETTE.blue, 1.8, 0.3)
   const black: InstanceItem[] = []
   const staffBlack: InstanceItem[] = []
@@ -117,7 +117,7 @@ function doors(b: ShellBuild): THREE.Group {
       font: 'jp',
     }),
     // 扉の内側の玄関マット
-    mesh(new THREE.BoxGeometry(1.6, 0.012, 0.95), new THREE.MeshStandardMaterial({ color: '#0b0e12', roughness: 0.95, metalness: 0 }), {
+    mesh(new THREE.BoxGeometry(1.6, 0.012, 0.95), new THREE.MeshStandardMaterial({ name: 'doorMat', color: '#0b0e12', roughness: 0.95, metalness: 0 }), {
       p: [(ENTRANCE.glassDoor[0] + ENTRANCE.glassDoor[1]) / 2, 0.006, inward(0.75)],
     }),
   ])
@@ -193,9 +193,9 @@ function hirakiFuda(b: ShellBuild): THREE.Group {
   const fuda = hirakiFudaTexture()
   const bousai = bousaiFudaTexture()
   // 琺瑯: つやのある焼き付けのガラス質。光らない（emissive なし）
-  const enamel = new THREE.MeshPhysicalMaterial({ map: fuda, roughness: 0.32, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.12, transparent: true, alphaTest: 0.5 })
-  const bousaiMat = new THREE.MeshPhysicalMaterial({ map: bousai, roughness: 0.32, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.12, transparent: true, alphaTest: 0.5 })
-  const back = new THREE.MeshStandardMaterial({ color: new THREE.Color(WAKABA).multiplyScalar(0.55), roughness: 0.5 })
+  const enamel = new THREE.MeshPhysicalMaterial({ name: 'enamelSign', map: fuda, roughness: 0.32, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.12, transparent: true, alphaTest: 0.5 })
+  const bousaiMat = new THREE.MeshPhysicalMaterial({ name: 'enamelSign', map: bousai, roughness: 0.32, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.12, transparent: true, alphaTest: 0.5 })
+  const back = new THREE.MeshStandardMaterial({ name: 'signBacking', color: new THREE.Color(WAKABA).multiplyScalar(0.55), roughness: 0.5 })
   const W = 0.3
   const HGT = 0.4
   const y = 1.62

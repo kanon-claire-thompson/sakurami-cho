@@ -43,6 +43,7 @@ export function createRobotArm(at: Placement, _opts: object | undefined, ctx: La
     const geometry = own.add(new THREE.PlaneGeometry(2.2, 2.2))
     const material = own.add(
       new THREE.MeshStandardMaterial({
+        name: 'floorMarking',
         map: tex,
         color: '#8fa0b2',
         transparent: true,

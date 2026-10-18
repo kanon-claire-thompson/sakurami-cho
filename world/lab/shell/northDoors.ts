@@ -44,7 +44,7 @@ export function buildNorthDoors(b: ShellBuild): THREE.Group {
   // 扉の上の LED と縦枠の細い光は、部屋の LED と一緒に配信中は落とす
   const led = dimmableGlowMaterial(PALETTE.cyan, 2.2, 0.2)
   const jambLine = dimmableGlowMaterial(PALETTE.blue, 1.8, 0.3)
-  const visionGlass = new THREE.MeshStandardMaterial({ color: '#06090d', metalness: 0.3, roughness: 0.08 })
+  const visionGlass = new THREE.MeshStandardMaterial({ name: 'visionGlass', color: '#06090d', metalness: 0.3, roughness: 0.08 })
 
   const frames: InstanceItem[] = []
   const leaves: InstanceItem[] = []

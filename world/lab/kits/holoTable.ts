@@ -126,6 +126,7 @@ function table(b: Build, label: string): THREE.Group {
       new THREE.CircleGeometry(TABLE_R - 0.06, 96),
       own.add(
         new THREE.MeshPhysicalMaterial({
+          name: 'holoTableTop',
           color: '#05080c',
           emissive: '#ffffff',
           emissiveMap: topTex,

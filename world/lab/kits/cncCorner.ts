@@ -40,7 +40,7 @@ export function createCncCorner(at: Placement, _opts: object | undefined, ctx: L
     const spindleRing = glowMaterial(PALETTE.cyan, GLOW.strip)
     const lamp = glowMaterial(PALETTE.cyan, GLOW.strong)
     const screenMat = () =>
-      own.add(new THREE.MeshStandardMaterial({ color: '#000', emissive: '#fff', emissiveMap: screen.texture, emissiveIntensity: 1.1, toneMapped: false }))
+      own.add(new THREE.MeshStandardMaterial({ name: 'cncScreen', color: '#000', emissive: '#fff', emissiveMap: screen.texture, emissiveIntensity: 1.1, toneMapped: false }))
 
     const base = m(new THREE.BoxGeometry(W, BASE, D), mats.darkMetal, { p: [0, BASE / 2, D / 2], cast: true, receive: true })
     const baseBolts = bolts({ positions: boltGrid([0, BASE / 2, D + 0.002], W - 0.08, BASE - 0.08, 'xy', 3, 3), axis: 'z', radius: 0.01 }, mats)
@@ -128,8 +128,8 @@ export function createCncCorner(at: Placement, _opts: object | undefined, ctx: L
     }
     const drawerGeom = own.add(new THREE.BoxGeometry(dw - 0.012, dh - 0.012, 0.2))
     const labelGeom = own.add(new THREE.PlaneGeometry(0.08, 0.02))
-    const drawerMat = own.add(new THREE.MeshPhysicalMaterial({ color: '#8fb7d6', roughness: 0.25, transmission: 0, transparent: true, opacity: 0.55, metalness: 0 }))
-    const labelMat = own.add(new THREE.MeshStandardMaterial({ color: '#e7ecf1', roughness: 0.7 }))
+    const drawerMat = own.add(new THREE.MeshPhysicalMaterial({ name: 'drawerAcrylic', color: '#8fb7d6', roughness: 0.25, transmission: 0, transparent: true, opacity: 0.55, metalness: 0 }))
+    const labelMat = own.add(new THREE.MeshStandardMaterial({ name: 'drawerLabel', color: '#e7ecf1', roughness: 0.7 }))
     return group(
       [
         m(new THREE.BoxGeometry(cols * dw + 0.04, rows * dh + 0.04, 0.2), mats.darkMetal, { p: [0, 0, 0.1], cast: true, receive: true }),

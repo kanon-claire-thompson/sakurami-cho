@@ -15,6 +15,7 @@
 import { Fn, If, abs, clamp, dot, float, floor, fract, length, max, min, mix, mod, select, sign, smoothstep, step, vec2, vec3 } from 'three/tsl'
 import type { Node } from 'three/webgpu'
 import { oHash, outdoorUniforms } from '../materials'
+import { outdoorPaint, type PaintSurface } from '../paint'
 
 /** 外壁の型の番号（GLSL の facadeType と同じ） */
 export const FACADE_TYPE = { woodHouse: 0, mortarHouse: 1, brick: 3, stone: 4, apartment: 5, office: 6, curtainWall: 7, factory: 8, school: 9 } as const
@@ -137,10 +138,18 @@ export const dirtOf = Fn(([style, seed]: [F, F]) => {
 })
 
 /**
- * 光（太陽・空・照り返し・環境光の遮り）: townLight(albedo, 法線, 環境光の遮り ao, 影 sh)（TSL の Fn。影は shadows.ts の townShadow）。
- * 太陽の直射（影 sh）と空の光（ao）と、地面の照り返し（下を向くほど・太陽が高いほど暖色）
+ * 光（太陽・空・照り返し・環境光の遮り）: townLight(albedo, 法線, 環境光の遮り ao, 影 sh, 面の種類)（影は shadows.ts の townShadow）。
+ * 太陽の直射（影 sh）と空の光（ao）と、地面の照り返し（下を向くほど・太陽が高いほど暖色）。
+ * 外の塗り（paint.ts）の light を入れたら、そちらに面の種類（surface。省けば other）と一緒に渡す
  */
-export const townLight = Fn(([albedo, N, ao, sh]: [Node<'vec3'>, Node<'vec3'>, Node<'float'>, Node<'float'>]) => {
+export const townLight = (albedo: Node<'vec3'>, N: Node<'vec3'>, ao: Node<'float'> | number, sh: Node<'float'> | number, surface: PaintSurface = 'other'): Node<'vec3'> => {
+  const p = outdoorPaint()
+  if (p?.light) return p.light(albedo, N, typeof ao === 'number' ? float(ao) : ao, typeof sh === 'number' ? float(sh) : sh, surface)
+  return townLightBase(albedo, N, ao, sh)
+}
+
+/** 前の townLight の式（TSL の Fn。外の塗りの式から読める） */
+export const townLightBase = Fn(([albedo, N, ao, sh]: [Node<'vec3'>, Node<'vec3'>, Node<'float'>, Node<'float'>]) => {
   const u = outdoorUniforms
   const ndl = max(dot(N, u.uSunDir), 0.0)
   const up = N.y.mul(0.5).add(0.5)

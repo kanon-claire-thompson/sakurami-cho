@@ -49,6 +49,7 @@ import { roomInterior, townLight } from '../town/facades'
 import { townShadow } from '../town/shadows'
 import { townTextureUniforms } from '../town/townTextures'
 import { townLampsEx } from '../town/lamps'
+import { outdoorPaint, paintFlat } from '../paint'
 
 type Node<T = unknown> = THREE.Node<T>
 type F = Node<'float'>
@@ -311,274 +312,291 @@ export function namedSurface(v: SurfaceInputs, interior?: (s: SurfaceState) => v
   const gray = (t: V3) => vec3(dot(t, LUMA))
   const addTn = (x: F | number, y: F | number) => tn.assign(vec3(tn.x.add(x), tn.y.add(y), tn.z))
 
-  If(id.lessThan(0.5), () => {
-    // 煉瓦
-    const t = bAlb(suv.div(2.0), 3).toVar()
-    albedo.mulAssign(mix(gray(t), t, 0.35).mul(1.05))
-    tn.assign(bNrm(suv.div(2.0), 3))
-    albedo.mulAssign(n2.mul(0.24).add(0.88))
-    gloss.assign(0.05)
-  })
-    .ElseIf(id.lessThan(1.5), () => {
-      // 切石（横の目地と、段ごとにずらした縦の目地）
-      const t = bAlb(suv.div(2.6), 2).toVar()
-      albedo.mulAssign(mix(vec3(1.0), mix(gray(t), t, 0.4), 0.7))
-      tn.assign(bNrm(suv.div(2.6), 2).mul(vec3(0.6, 0.6, 1.0)))
-      If(aux.greaterThan(0.01), () => {
-        const row = floor(uv.y.div(aux)).toVar()
-        const ux = uv.x.div(aux.mul(2.2)).add(fract(row.mul(0.5))).toVar()
-        const gy = abs(fract(uv.y.div(aux).add(0.5)).sub(0.5)).mul(aux)
-        const gx = abs(fract(ux.add(0.5)).sub(0.5)).mul(aux).mul(2.2)
-        const joint = max(lineAA(gy, 0.008, fw.y), lineAA(gx, 0.008, fw.x)).mul(smoothstep(0.02, 0.06, px).oneMinus())
-        albedo.mulAssign(joint.mul(-0.32).add(1.0))
-        const fyw = fw.y.div(aux)
-        const fy = fract(uv.y.div(aux))
-        addTn(0.0, lineAA(abs(fy.sub(0.02)), 0.02, fyw).sub(lineAA(abs(fy.sub(0.98)), 0.02, fyw)).mul(0.5).mul(nk))
-        albedo.mulAssign(oHash(vec2(floor(ux), row).add(seed)).mul(0.12).add(0.94))
-      })
-      albedo.mulAssign(n2.mul(0.2).add(0.9))
-      gloss.assign(0.07)
-    })
-    .ElseIf(id.lessThan(2.5), () => {
-      // 漆喰・モルタル
-      const t = bAlb(suv.div(3.0), 1).toVar()
-      albedo.mulAssign(mix(vec3(1.0), gray(t), 0.8))
-      tn.assign(bNrm(suv.div(3.0), 1).mul(vec3(0.7, 0.7, 1.0)))
-      albedo.mulAssign(n2.mul(0.14).add(0.92))
-      gloss.assign(0.05)
-    })
-    .ElseIf(id.lessThan(3.5), () => {
-      // 下見板: 板の下端の影（重なり）と、板ごとの色むら
-      const bw = max(aux, 0.08).toVar()
-      const f = fract(uv.y.div(bw)).toVar()
-      const board = floor(uv.y.div(bw)).toVar()
-      const lap = smoothstep(0.0, 0.18, f).toVar()
-      const h1 = oHash(vec2(board, 1.0)).toVar()
-      albedo.mulAssign(mix(0.62, 1.0, lap).mul(oHash(vec2(board, floor(uv.x.div(3.6).add(h1)))).mul(0.1).add(0.94)))
-      addTn(0.0, lap.oneMinus().mul(0.9).mul(nk).negate())
-      const t = bAlb(vec2(uv.x.div(2.4), f.mul(0.08).add(board.mul(0.13))), 0).toVar()
-      albedo.mulAssign(mix(vec3(1.0), gray(t), 0.35))
-      // 継ぎ目（縦）
-      const j = lineAA(abs(fract(uv.x.div(3.6).add(h1)).sub(0.5)).mul(3.6), 0.006, fw.x)
-      albedo.mulAssign(j.mul(0.25).mul(smoothstep(0.02, 0.05, px).oneMinus()).oneMinus())
-      gloss.assign(0.1)
-    })
-    .ElseIf(id.lessThan(4.5), () => {
-      // 縦の板張り
-      const bw = max(aux, 0.08).toVar()
-      const f = fract(uv.x.div(bw)).toVar()
-      const plank = floor(uv.x.div(bw)).toVar()
-      const t = bAlb(vec2(uv.y.div(2.4), f.mul(0.1).add(plank.mul(0.17))), 0)
-      albedo.mulAssign(mix(vec3(1.0), t, 0.6).mul(oHash(vec2(plank, seed)).mul(0.2).add(0.88)))
-      const gap = lineAA(abs(f.sub(0.5)).mul(bw), bw.mul(0.5).sub(0.006), fw.x)
-      albedo.mulAssign(mix(0.55, 1.0, gap))
-      addTn(smoothstep(0.0, 0.12, f).sub(smoothstep(0.88, 1.0, f)).mul(0.4).mul(nk), 0.0)
-      gloss.assign(0.06)
-    })
-    .ElseIf(id.lessThan(5.5), () => {
-      // コンクリート
-      const t = bAlb(suv.div(3.2), 4).toVar()
-      albedo.mulAssign(mix(vec3(1.0), gray(t), 0.8))
-      tn.assign(bNrm(suv.div(3.2), 4).mul(vec3(0.6, 0.6, 1.0)))
-      albedo.mulAssign(n2.mul(0.2).add(0.9))
-      gloss.assign(0.06)
-    })
-    .ElseIf(id.lessThan(6.5), () => {
-      // 塗装（木・鉄）。少しの色むらと、はげ
-      albedo.mulAssign(n1.mul(0.12).add(0.92))
-      const chip = smoothstep(0.8, 0.9, oNoise(uv.mul(6.0).add(seed.mul(3.0)))).mul(aux.oneMinus()).mul(dirt)
-      albedo.assign(mix(albedo, albedo.mul(0.55).add(vec3(0.03, 0.025, 0.02)), chip.mul(0.6)))
-      gloss.assign(aux.mul(0.55).add(0.12))
-    })
-    .ElseIf(id.lessThan(7.5), () => {
-      // 和瓦（瓦の列は斜面に沿って。質感の瓦）
-      const t = bAlb(suv.div(2.2), 7).toVar()
-      albedo.mulAssign(mix(gray(t), t, 0.15))
-      tn.assign(bNrm(suv.div(2.2), 7))
-      albedo.mulAssign(n2.mul(0.26).add(0.86))
-      gloss.assign(0.16)
-    })
-    .ElseIf(id.lessThan(8.5), () => {
-      // 洋瓦
-      const t = bAlb(suv.div(2.0), 6).toVar()
-      albedo.mulAssign(mix(gray(t), t, 0.3))
-      tn.assign(bNrm(suv.div(2.0), 6))
-      albedo.mulAssign(n2.mul(0.26).add(0.86))
-      gloss.assign(0.1)
-    })
-    .ElseIf(id.lessThan(9.5), () => {
-      // スレート
-      const t = bAlb(suv.div(2.0), 8).toVar()
-      albedo.mulAssign(mix(gray(t), t, 0.2))
-      tn.assign(bNrm(suv.div(2.0), 8))
-      albedo.mulAssign(n2.mul(0.22).add(0.88))
-      gloss.assign(0.14)
-    })
-    .ElseIf(id.lessThan(10.5), () => {
-      // 銅板の緑青: 縦の継ぎ目（はぜ）、雨の筋、所々の茶色い銅の地
-      const sp = max(aux, 0.3).toVar()
-      const f = fract(uv.x.div(sp)).toVar()
-      const seam = lineAA(abs(f.sub(0.5)).mul(sp), 0.012, fw.x)
-      const streak = oNoise(vec2(uv.x.mul(2.7), uv.y.mul(0.12)).add(seed)).mul(0.7).add(oNoise(vec2(uv.x.mul(9.0), uv.y.mul(0.5))).mul(0.3))
-      const patina = mix(albedo.mul(0.82), albedo.mul(vec3(1.08, 1.12, 1.05)), smoothstep(0.3, 0.75, streak))
-      const bare = smoothstep(0.78, 0.92, oNoise(uv.mul(0.9).add(seed.mul(4.0)))).mul(0.6)
-      albedo.assign(mix(patina, vec3(0.16, 0.09, 0.05), bare))
-      albedo.mulAssign(seam.mul(-0.25).add(1.0))
-      addTn(smoothstep(0.42, 0.5, f).sub(smoothstep(0.5, 0.58, f)).mul(0.8).mul(nk), 0.0)
-      gloss.assign(0.12)
-    })
-    .ElseIf(id.lessThan(11.5), () => {
-      // 金属の屋根・波板
-      const t = bAlb(suv.div(2.4), 5).toVar()
-      albedo.mulAssign(mix(vec3(1.0), gray(t), 0.7))
-      tn.assign(bNrm(suv.div(2.4), 5))
-      If(abs(aux).greaterThan(0.01), () => {
-        // aux > 0 は縦の波（波板の屋根）、aux < 0 は横の筋（シャッター）
-        const w = sin(select(aux.greaterThan(0.0), uv.x, uv.y).div(abs(aux)).mul(6.2832)).toVar()
-        If(aux.greaterThan(0.0), () => {
-          addTn(w.mul(0.5).mul(nk), 0.0)
-        }).Else(() => {
-          addTn(0.0, w.mul(0.5).mul(nk))
-        })
-        albedo.mulAssign(w.mul(0.08).add(0.92))
-      })
-      const rust = smoothstep(0.7, 0.9, oNoise(uv.mul(0.6).add(seed.mul(5.0)))).mul(dirt)
-      albedo.assign(mix(albedo, vec3(0.2, 0.1, 0.05), rust.mul(0.5)))
-      gloss.assign(0.3)
-      metal.assign(0.3)
-    })
-    .ElseIf(id.lessThan(12.5), () => {
-      // 濃いガラス
-      albedo.assign(vec3(0.02, 0.025, 0.03))
-      gloss.assign(0.9)
-      metal.assign(0.0)
-    })
-    .ElseIf(id.lessThan(13.5), () => {
-      // 御影石
-      const t = bAlb(suv.div(1.2), 2).toVar()
-      albedo.mulAssign(mix(vec3(1.0), gray(t), 0.6))
-      albedo.mulAssign(oHash(floor(uv.mul(160.0))).mul(0.28).add(0.86))
-      tn.assign(bNrm(suv.div(1.2), 2).mul(vec3(0.4, 0.4, 1.0)))
-      gloss.assign(0.18)
-    })
-    .ElseIf(id.lessThan(14.5), () => {
-      // 木（板）
-      const wuv = select(aux.greaterThan(0.5), vec2(uv.y, uv.x), uv).toVar()
-      const t = bAlb(wuv.div(2.4), 0)
-      albedo.mulAssign(mix(vec3(1.0), t, 0.75))
-      tn.assign(bNrm(wuv.div(2.4), 0).mul(vec3(0.5, 0.5, 1.0)))
-      gloss.assign(0.1)
-    })
-    .ElseIf(id.lessThan(15.5), () => {
-      // 布（縞は面の横の向き）
-      If(aux.greaterThan(0.5), () => {
-        const st = step(0.5, fract(uv.x.mul(aux).mul(0.5)))
-        albedo.assign(mix(albedo, vec3(0.78, 0.76, 0.7), st.mul(0.85)))
-      })
-      albedo.mulAssign(oNoise(uv.mul(3.0)).mul(0.12).add(0.9))
-      // 布の裏から日が透ける
-      gloss.assign(0.03)
-    })
-    .ElseIf(id.lessThan(16.5), () => {
-      // 格子（細い縦の桟と暗いすき間）
-      const sp = max(aux, 0.03).toVar()
-      const f = abs(fract(uv.x.div(sp)).sub(0.5)).mul(sp)
-      const bar = lineAA(f, sp.mul(0.32), fw.x).toVar()
-      const fade = smoothstep(0.004, 0.02, px).toVar()
-      albedo.assign(mix(albedo.mul(mix(0.12, 1.0, bar)), albedo.mul(0.5), fade))
-      addTn(select(bar.lessThan(0.5), 0.0, fract(uv.x.div(sp)).sub(0.5).mul(1.2)).mul(fade.oneMinus()), 0.0)
-      gloss.assign(0.08)
-    })
-    .ElseIf(id.lessThan(17.5), () => {
-      // 金色・真鍮
-      metal.assign(1.0)
-      gloss.assign(0.6)
-      albedo.mulAssign(n1.mul(0.15).add(0.9))
-    })
-    .ElseIf(id.lessThan(18.5), () => {
-      // 葉（蔦・生け垣）: 葉の粒と、すき間の暗さ
-      const l1 = oNoise(uv.mul(7.0).add(seed.mul(9.0)))
-      const l2 = oNoise(uv.mul(19.0).add(seed.mul(3.0))).toVar()
-      const leaf = smoothstep(0.35, 0.7, l1.mul(0.6).add(l2.mul(0.4))).toVar()
-      albedo.assign(mix(albedo.mul(0.35), albedo.mul(l2.mul(0.35).add(0.85)), leaf))
-      const d = vec2(oNoise(uv.mul(23.0)), oNoise(uv.mul(23.0).add(5.0))).sub(0.5).mul(1.6).mul(nk).toVar()
-      addTn(d.x, d.y)
-      ao.mulAssign(leaf.mul(0.25).add(0.75))
-      gloss.assign(0.08)
-    })
-    .ElseIf(id.lessThan(19.5), () => {
-      // 石畳
-      const t = gAlb(suv.div(1.8), 3).toVar()
-      albedo.mulAssign(mix(vec3(1.0), mix(gray(t), t, 0.5), 0.85))
-      tn.assign(gNrm(suv.div(1.8), 3))
-      gloss.assign(0.08)
-    })
-    .ElseIf(id.lessThan(20.5), () => {
-      // 屋上の防水
-      const t = bAlb(suv.div(3.2), 4).toVar()
-      albedo.mulAssign(mix(vec3(1.0), gray(t), 0.4))
-      const lap = lineAA(abs(fract(uv.x).sub(0.5)), 0.004, fw.x)
-      albedo.mulAssign(n2.mul(0.28).add(0.82).mul(lap.mul(-0.12).add(1.0)))
-      gloss.assign(0.08)
-    })
-    .ElseIf(id.lessThan(21.5), () => {
-      // 朱塗り（色あせ・はげて白木が見える所）
-      const fade = n2.mul(0.5).add(0.25)
-      albedo.assign(mix(albedo, albedo.mul(vec3(1.15, 0.85, 0.8)).add(0.03), fade.mul(0.35)))
-      const peel = smoothstep(0.78, 0.9, oNoise(uv.mul(4.0).add(seed.mul(6.0)))).mul(dirt)
-      albedo.assign(mix(albedo, vec3(0.42, 0.32, 0.22), peel))
-      gloss.assign(0.22)
-    })
-    .ElseIf(id.lessThan(22.5), () => {
-      // タイル張り
-      const ts = max(aux, 0.05).toVar()
-      const cell = vec2(ts.mul(2.0), ts).toVar()
-      const g = abs(fract(uv.div(cell).add(0.5)).sub(0.5)).mul(cell).toVar()
-      const joint = max(lineAA(g.x, 0.004, fw.x), lineAA(g.y, 0.004, fw.y)).mul(smoothstep(0.01, 0.03, px).oneMinus())
-      albedo.mulAssign(oHash(floor(uv.div(cell)).add(seed)).mul(0.16).add(0.9).mul(joint.mul(-0.3).add(1.0)))
-      gloss.assign(0.2)
-    })
-    .ElseIf(id.lessThan(23.5), () => {
-      // 土・砂利
-      const t = gAlb(suv.div(1.5), 2)
-      albedo.mulAssign(mix(vec3(1.0), t, 0.9))
-      tn.assign(gNrm(suv.div(1.5), 2))
-      gloss.assign(0.03)
-    })
-    .ElseIf(id.lessThan(24.5), () => {
-      // 暗い奥
+  // 外の塗り（paint.ts）の flat: 質感の写真・目地・むら・汚れを省き、頂点の色の平らな塗りにする（暗い奥・金属の度合いだけ残す）
+  const flat = paintFlat()
+  if (flat) {
+    If(id.greaterThan(23.5).and(id.lessThan(24.5)), () => {
       albedo.mulAssign(0.25)
       ao.mulAssign(0.5)
     })
-    .ElseIf(id.greaterThan(25.5), () => {
-      // ステンレス・アルミ
-      metal.assign(1.0)
-      gloss.assign(0.55)
-      albedo.mulAssign(oNoise(uv.mul(14.0)).mul(0.12).add(0.92))
+      .ElseIf(id.greaterThan(25.5), () => {
+        metal.assign(1.0)
+      })
+      .ElseIf(id.greaterThan(24.5), () => {
+        metal.assign(0.4)
+      })
+  } else {
+    If(id.lessThan(0.5), () => {
+      // 煉瓦
+      const t = bAlb(suv.div(2.0), 3).toVar()
+      albedo.mulAssign(mix(gray(t), t, 0.35).mul(1.05))
+      tn.assign(bNrm(suv.div(2.0), 3))
+      albedo.mulAssign(n2.mul(0.24).add(0.88))
+      gloss.assign(0.05)
     })
-    .Else(() => {
-      // 鉄（黒い鉄）
-      albedo.mulAssign(n1.mul(0.1).add(0.9))
-      const rust = smoothstep(0.75, 0.92, oNoise(uv.mul(3.0).add(seed.mul(2.0)))).mul(dirt)
-      albedo.assign(mix(albedo, vec3(0.16, 0.07, 0.03), rust.mul(0.6)))
-      gloss.assign(aux.mul(0.4).add(0.2))
-      metal.assign(0.4)
-    })
+      .ElseIf(id.lessThan(1.5), () => {
+        // 切石（横の目地と、段ごとにずらした縦の目地）
+        const t = bAlb(suv.div(2.6), 2).toVar()
+        albedo.mulAssign(mix(vec3(1.0), mix(gray(t), t, 0.4), 0.7))
+        tn.assign(bNrm(suv.div(2.6), 2).mul(vec3(0.6, 0.6, 1.0)))
+        If(aux.greaterThan(0.01), () => {
+          const row = floor(uv.y.div(aux)).toVar()
+          const ux = uv.x.div(aux.mul(2.2)).add(fract(row.mul(0.5))).toVar()
+          const gy = abs(fract(uv.y.div(aux).add(0.5)).sub(0.5)).mul(aux)
+          const gx = abs(fract(ux.add(0.5)).sub(0.5)).mul(aux).mul(2.2)
+          const joint = max(lineAA(gy, 0.008, fw.y), lineAA(gx, 0.008, fw.x)).mul(smoothstep(0.02, 0.06, px).oneMinus())
+          albedo.mulAssign(joint.mul(-0.32).add(1.0))
+          const fyw = fw.y.div(aux)
+          const fy = fract(uv.y.div(aux))
+          addTn(0.0, lineAA(abs(fy.sub(0.02)), 0.02, fyw).sub(lineAA(abs(fy.sub(0.98)), 0.02, fyw)).mul(0.5).mul(nk))
+          albedo.mulAssign(oHash(vec2(floor(ux), row).add(seed)).mul(0.12).add(0.94))
+        })
+        albedo.mulAssign(n2.mul(0.2).add(0.9))
+        gloss.assign(0.07)
+      })
+      .ElseIf(id.lessThan(2.5), () => {
+        // 漆喰・モルタル
+        const t = bAlb(suv.div(3.0), 1).toVar()
+        albedo.mulAssign(mix(vec3(1.0), gray(t), 0.8))
+        tn.assign(bNrm(suv.div(3.0), 1).mul(vec3(0.7, 0.7, 1.0)))
+        albedo.mulAssign(n2.mul(0.14).add(0.92))
+        gloss.assign(0.05)
+      })
+      .ElseIf(id.lessThan(3.5), () => {
+        // 下見板: 板の下端の影（重なり）と、板ごとの色むら
+        const bw = max(aux, 0.08).toVar()
+        const f = fract(uv.y.div(bw)).toVar()
+        const board = floor(uv.y.div(bw)).toVar()
+        const lap = smoothstep(0.0, 0.18, f).toVar()
+        const h1 = oHash(vec2(board, 1.0)).toVar()
+        albedo.mulAssign(mix(0.62, 1.0, lap).mul(oHash(vec2(board, floor(uv.x.div(3.6).add(h1)))).mul(0.1).add(0.94)))
+        addTn(0.0, lap.oneMinus().mul(0.9).mul(nk).negate())
+        const t = bAlb(vec2(uv.x.div(2.4), f.mul(0.08).add(board.mul(0.13))), 0).toVar()
+        albedo.mulAssign(mix(vec3(1.0), gray(t), 0.35))
+        // 継ぎ目（縦）
+        const j = lineAA(abs(fract(uv.x.div(3.6).add(h1)).sub(0.5)).mul(3.6), 0.006, fw.x)
+        albedo.mulAssign(j.mul(0.25).mul(smoothstep(0.02, 0.05, px).oneMinus()).oneMinus())
+        gloss.assign(0.1)
+      })
+      .ElseIf(id.lessThan(4.5), () => {
+        // 縦の板張り
+        const bw = max(aux, 0.08).toVar()
+        const f = fract(uv.x.div(bw)).toVar()
+        const plank = floor(uv.x.div(bw)).toVar()
+        const t = bAlb(vec2(uv.y.div(2.4), f.mul(0.1).add(plank.mul(0.17))), 0)
+        albedo.mulAssign(mix(vec3(1.0), t, 0.6).mul(oHash(vec2(plank, seed)).mul(0.2).add(0.88)))
+        const gap = lineAA(abs(f.sub(0.5)).mul(bw), bw.mul(0.5).sub(0.006), fw.x)
+        albedo.mulAssign(mix(0.55, 1.0, gap))
+        addTn(smoothstep(0.0, 0.12, f).sub(smoothstep(0.88, 1.0, f)).mul(0.4).mul(nk), 0.0)
+        gloss.assign(0.06)
+      })
+      .ElseIf(id.lessThan(5.5), () => {
+        // コンクリート
+        const t = bAlb(suv.div(3.2), 4).toVar()
+        albedo.mulAssign(mix(vec3(1.0), gray(t), 0.8))
+        tn.assign(bNrm(suv.div(3.2), 4).mul(vec3(0.6, 0.6, 1.0)))
+        albedo.mulAssign(n2.mul(0.2).add(0.9))
+        gloss.assign(0.06)
+      })
+      .ElseIf(id.lessThan(6.5), () => {
+        // 塗装（木・鉄）。少しの色むらと、はげ
+        albedo.mulAssign(n1.mul(0.12).add(0.92))
+        const chip = smoothstep(0.8, 0.9, oNoise(uv.mul(6.0).add(seed.mul(3.0)))).mul(aux.oneMinus()).mul(dirt)
+        albedo.assign(mix(albedo, albedo.mul(0.55).add(vec3(0.03, 0.025, 0.02)), chip.mul(0.6)))
+        gloss.assign(aux.mul(0.55).add(0.12))
+      })
+      .ElseIf(id.lessThan(7.5), () => {
+        // 和瓦（瓦の列は斜面に沿って。質感の瓦）
+        const t = bAlb(suv.div(2.2), 7).toVar()
+        albedo.mulAssign(mix(gray(t), t, 0.15))
+        tn.assign(bNrm(suv.div(2.2), 7))
+        albedo.mulAssign(n2.mul(0.26).add(0.86))
+        gloss.assign(0.16)
+      })
+      .ElseIf(id.lessThan(8.5), () => {
+        // 洋瓦
+        const t = bAlb(suv.div(2.0), 6).toVar()
+        albedo.mulAssign(mix(gray(t), t, 0.3))
+        tn.assign(bNrm(suv.div(2.0), 6))
+        albedo.mulAssign(n2.mul(0.26).add(0.86))
+        gloss.assign(0.1)
+      })
+      .ElseIf(id.lessThan(9.5), () => {
+        // スレート
+        const t = bAlb(suv.div(2.0), 8).toVar()
+        albedo.mulAssign(mix(gray(t), t, 0.2))
+        tn.assign(bNrm(suv.div(2.0), 8))
+        albedo.mulAssign(n2.mul(0.22).add(0.88))
+        gloss.assign(0.14)
+      })
+      .ElseIf(id.lessThan(10.5), () => {
+        // 銅板の緑青: 縦の継ぎ目（はぜ）、雨の筋、所々の茶色い銅の地
+        const sp = max(aux, 0.3).toVar()
+        const f = fract(uv.x.div(sp)).toVar()
+        const seam = lineAA(abs(f.sub(0.5)).mul(sp), 0.012, fw.x)
+        const streak = oNoise(vec2(uv.x.mul(2.7), uv.y.mul(0.12)).add(seed)).mul(0.7).add(oNoise(vec2(uv.x.mul(9.0), uv.y.mul(0.5))).mul(0.3))
+        const patina = mix(albedo.mul(0.82), albedo.mul(vec3(1.08, 1.12, 1.05)), smoothstep(0.3, 0.75, streak))
+        const bare = smoothstep(0.78, 0.92, oNoise(uv.mul(0.9).add(seed.mul(4.0)))).mul(0.6)
+        albedo.assign(mix(patina, vec3(0.16, 0.09, 0.05), bare))
+        albedo.mulAssign(seam.mul(-0.25).add(1.0))
+        addTn(smoothstep(0.42, 0.5, f).sub(smoothstep(0.5, 0.58, f)).mul(0.8).mul(nk), 0.0)
+        gloss.assign(0.12)
+      })
+      .ElseIf(id.lessThan(11.5), () => {
+        // 金属の屋根・波板
+        const t = bAlb(suv.div(2.4), 5).toVar()
+        albedo.mulAssign(mix(vec3(1.0), gray(t), 0.7))
+        tn.assign(bNrm(suv.div(2.4), 5))
+        If(abs(aux).greaterThan(0.01), () => {
+          // aux > 0 は縦の波（波板の屋根）、aux < 0 は横の筋（シャッター）
+          const w = sin(select(aux.greaterThan(0.0), uv.x, uv.y).div(abs(aux)).mul(6.2832)).toVar()
+          If(aux.greaterThan(0.0), () => {
+            addTn(w.mul(0.5).mul(nk), 0.0)
+          }).Else(() => {
+            addTn(0.0, w.mul(0.5).mul(nk))
+          })
+          albedo.mulAssign(w.mul(0.08).add(0.92))
+        })
+        const rust = smoothstep(0.7, 0.9, oNoise(uv.mul(0.6).add(seed.mul(5.0)))).mul(dirt)
+        albedo.assign(mix(albedo, vec3(0.2, 0.1, 0.05), rust.mul(0.5)))
+        gloss.assign(0.3)
+        metal.assign(0.3)
+      })
+      .ElseIf(id.lessThan(12.5), () => {
+        // 濃いガラス
+        albedo.assign(vec3(0.02, 0.025, 0.03))
+        gloss.assign(0.9)
+        metal.assign(0.0)
+      })
+      .ElseIf(id.lessThan(13.5), () => {
+        // 御影石
+        const t = bAlb(suv.div(1.2), 2).toVar()
+        albedo.mulAssign(mix(vec3(1.0), gray(t), 0.6))
+        albedo.mulAssign(oHash(floor(uv.mul(160.0))).mul(0.28).add(0.86))
+        tn.assign(bNrm(suv.div(1.2), 2).mul(vec3(0.4, 0.4, 1.0)))
+        gloss.assign(0.18)
+      })
+      .ElseIf(id.lessThan(14.5), () => {
+        // 木（板）
+        const wuv = select(aux.greaterThan(0.5), vec2(uv.y, uv.x), uv).toVar()
+        const t = bAlb(wuv.div(2.4), 0)
+        albedo.mulAssign(mix(vec3(1.0), t, 0.75))
+        tn.assign(bNrm(wuv.div(2.4), 0).mul(vec3(0.5, 0.5, 1.0)))
+        gloss.assign(0.1)
+      })
+      .ElseIf(id.lessThan(15.5), () => {
+        // 布（縞は面の横の向き）
+        If(aux.greaterThan(0.5), () => {
+          const st = step(0.5, fract(uv.x.mul(aux).mul(0.5)))
+          albedo.assign(mix(albedo, vec3(0.78, 0.76, 0.7), st.mul(0.85)))
+        })
+        albedo.mulAssign(oNoise(uv.mul(3.0)).mul(0.12).add(0.9))
+        // 布の裏から日が透ける
+        gloss.assign(0.03)
+      })
+      .ElseIf(id.lessThan(16.5), () => {
+        // 格子（細い縦の桟と暗いすき間）
+        const sp = max(aux, 0.03).toVar()
+        const f = abs(fract(uv.x.div(sp)).sub(0.5)).mul(sp)
+        const bar = lineAA(f, sp.mul(0.32), fw.x).toVar()
+        const fade = smoothstep(0.004, 0.02, px).toVar()
+        albedo.assign(mix(albedo.mul(mix(0.12, 1.0, bar)), albedo.mul(0.5), fade))
+        addTn(select(bar.lessThan(0.5), 0.0, fract(uv.x.div(sp)).sub(0.5).mul(1.2)).mul(fade.oneMinus()), 0.0)
+        gloss.assign(0.08)
+      })
+      .ElseIf(id.lessThan(17.5), () => {
+        // 金色・真鍮
+        metal.assign(1.0)
+        gloss.assign(0.6)
+        albedo.mulAssign(n1.mul(0.15).add(0.9))
+      })
+      .ElseIf(id.lessThan(18.5), () => {
+        // 葉（蔦・生け垣）: 葉の粒と、すき間の暗さ
+        const l1 = oNoise(uv.mul(7.0).add(seed.mul(9.0)))
+        const l2 = oNoise(uv.mul(19.0).add(seed.mul(3.0))).toVar()
+        const leaf = smoothstep(0.35, 0.7, l1.mul(0.6).add(l2.mul(0.4))).toVar()
+        albedo.assign(mix(albedo.mul(0.35), albedo.mul(l2.mul(0.35).add(0.85)), leaf))
+        const d = vec2(oNoise(uv.mul(23.0)), oNoise(uv.mul(23.0).add(5.0))).sub(0.5).mul(1.6).mul(nk).toVar()
+        addTn(d.x, d.y)
+        ao.mulAssign(leaf.mul(0.25).add(0.75))
+        gloss.assign(0.08)
+      })
+      .ElseIf(id.lessThan(19.5), () => {
+        // 石畳
+        const t = gAlb(suv.div(1.8), 3).toVar()
+        albedo.mulAssign(mix(vec3(1.0), mix(gray(t), t, 0.5), 0.85))
+        tn.assign(gNrm(suv.div(1.8), 3))
+        gloss.assign(0.08)
+      })
+      .ElseIf(id.lessThan(20.5), () => {
+        // 屋上の防水
+        const t = bAlb(suv.div(3.2), 4).toVar()
+        albedo.mulAssign(mix(vec3(1.0), gray(t), 0.4))
+        const lap = lineAA(abs(fract(uv.x).sub(0.5)), 0.004, fw.x)
+        albedo.mulAssign(n2.mul(0.28).add(0.82).mul(lap.mul(-0.12).add(1.0)))
+        gloss.assign(0.08)
+      })
+      .ElseIf(id.lessThan(21.5), () => {
+        // 朱塗り（色あせ・はげて白木が見える所）
+        const fade = n2.mul(0.5).add(0.25)
+        albedo.assign(mix(albedo, albedo.mul(vec3(1.15, 0.85, 0.8)).add(0.03), fade.mul(0.35)))
+        const peel = smoothstep(0.78, 0.9, oNoise(uv.mul(4.0).add(seed.mul(6.0)))).mul(dirt)
+        albedo.assign(mix(albedo, vec3(0.42, 0.32, 0.22), peel))
+        gloss.assign(0.22)
+      })
+      .ElseIf(id.lessThan(22.5), () => {
+        // タイル張り
+        const ts = max(aux, 0.05).toVar()
+        const cell = vec2(ts.mul(2.0), ts).toVar()
+        const g = abs(fract(uv.div(cell).add(0.5)).sub(0.5)).mul(cell).toVar()
+        const joint = max(lineAA(g.x, 0.004, fw.x), lineAA(g.y, 0.004, fw.y)).mul(smoothstep(0.01, 0.03, px).oneMinus())
+        albedo.mulAssign(oHash(floor(uv.div(cell)).add(seed)).mul(0.16).add(0.9).mul(joint.mul(-0.3).add(1.0)))
+        gloss.assign(0.2)
+      })
+      .ElseIf(id.lessThan(23.5), () => {
+        // 土・砂利
+        const t = gAlb(suv.div(1.5), 2)
+        albedo.mulAssign(mix(vec3(1.0), t, 0.9))
+        tn.assign(gNrm(suv.div(1.5), 2))
+        gloss.assign(0.03)
+      })
+      .ElseIf(id.lessThan(24.5), () => {
+        // 暗い奥
+        albedo.mulAssign(0.25)
+        ao.mulAssign(0.5)
+      })
+      .ElseIf(id.greaterThan(25.5), () => {
+        // ステンレス・アルミ
+        metal.assign(1.0)
+        gloss.assign(0.55)
+        albedo.mulAssign(oNoise(uv.mul(14.0)).mul(0.12).add(0.92))
+      })
+      .Else(() => {
+        // 鉄（黒い鉄）
+        albedo.mulAssign(n1.mul(0.1).add(0.9))
+        const rust = smoothstep(0.75, 0.92, oNoise(uv.mul(3.0).add(seed.mul(2.0)))).mul(dirt)
+        albedo.assign(mix(albedo, vec3(0.16, 0.07, 0.03), rust.mul(0.6)))
+        gloss.assign(aux.mul(0.4).add(0.2))
+        metal.assign(0.4)
+      })
+  }
   emit.assign(0.0)
   if (interior) {
     If(id.greaterThan(26.5), () => {
       interior({ id, aux, uv, fw, px, seed, nk, n1, n2, T, B, N, color: v.color, albedo, tn, ao, gloss, metal, emit })
     })
   }
-  // 汚れ: 足元のはね返り（地面から 0.9m）、まだら、色あせ
-  const hg = wp.y.sub(v.ext.y).toVar()
-  If(abs(N.y).lessThan(0.9).and(id.notEqual(24.0)), () => {
-    const foot = smoothstep(-0.2, n2.mul(0.5).add(0.9), hg).oneMinus()
-    albedo.mulAssign(dirt.mul(0.35).mul(foot).mul(n1.mul(0.4).add(0.6)).oneMinus())
-    const blot = smoothstep(0.55, 0.85, oNoise(uv.mul(0.35).add(seed.mul(17.0))).mul(0.6).add(n1.mul(0.4)))
-    albedo.mulAssign(dirt.mul(0.16).mul(blot).oneMinus())
-  })
-  albedo.assign(mix(albedo, gray(albedo), dirt.mul(0.12)))
+  if (!flat) {
+    // 汚れ: 足元のはね返り（地面から 0.9m）、まだら、色あせ
+    const hg = wp.y.sub(v.ext.y).toVar()
+    If(abs(N.y).lessThan(0.9).and(id.notEqual(24.0)), () => {
+      const foot = smoothstep(-0.2, n2.mul(0.5).add(0.9), hg).oneMinus()
+      albedo.mulAssign(dirt.mul(0.35).mul(foot).mul(n1.mul(0.4).add(0.6)).oneMinus())
+      const blot = smoothstep(0.55, 0.85, oNoise(uv.mul(0.35).add(seed.mul(17.0))).mul(0.6).add(n1.mul(0.4)))
+      albedo.mulAssign(dirt.mul(0.16).mul(blot).oneMinus())
+    })
+    albedo.assign(mix(albedo, gray(albedo), dirt.mul(0.12)))
+  }
   // 法線の凹凸（遠くは弱く）
   const tnk = tn.xy.mul(nk)
   const Nd = normalize(T.mul(tnk.x).add(B.mul(tnk.y)).add(N.mul(max(tn.z, 0.3)))).toVar()
@@ -594,7 +612,13 @@ export function createNamedMaterial() {
     const wp = v.world
     const s = namedSurface(v)
     const sh = townShadow(wp, s.N).toVar()
-    const col = townLight(s.albedo.mul(s.metal.mul(-0.6).add(1.0)), s.Nd, s.ao, sh).toVar()
+    const col = townLight(s.albedo.mul(s.metal.mul(-0.6).add(1.0)), s.Nd, s.ao, sh, 'named').toVar()
+    if (paintFlat()) {
+      // 平らな塗り: 照り返し・映り込みを省く
+      col.addAssign(s.albedo.mul(namedLamps(wp, s.Nd)))
+      col.addAssign(s.albedo.mul(townLampsEx(wp, s.Nd, float(1.0), float(0.08))).mul(s.ao))
+      return outdoorHaze(col, wp)
+    }
     // 鏡面: 太陽のハイライトと空の映り込み
     const V = normalize(cameraPosition.sub(wp)).toVar()
     const H = normalize(V.add(u.uSunDir))
@@ -672,6 +696,7 @@ export function createNamedGlassMaterial() {
   const vGrid = varying(attribute<'vec4'>('aGrid', 'vec4'))
   const vRoom = varying(attribute<'vec4'>('aRoom', 'vec4'))
   m.colorNode = Fn(() => {
+    const flatWindow = paintFlat() ? outdoorPaint()?.window : undefined
     const wp = positionWorld
     const N = normalize(vNormal).toVar()
     const toCam = cameraPosition.sub(wp).toVar()
@@ -746,6 +771,11 @@ export function createNamedGlassMaterial() {
         room.assign(vec3(0.012, 0.012, 0.014).add(lamp.mul(lit).mul(0.15)))
       })
       .Else(() => {
+        if (flatWindow) {
+          // 平らな塗り: ガラスの色は外の塗りの window（部屋の奥・カーテン・棚は描かない）
+          room.assign(flatWindow(lit, lamp.mul(bright), N, V, clamp(p.div(sz), 0.0, 1.0)))
+          return
+        }
         const office = select(kind.greaterThan(0.5).and(kind.lessThan(1.5)).or(kind.greaterThan(7.5)), 1.0, 0.0)
         const ri = roomInterior(p, sz, rd, 0.03, vRoom.x, vRoom.y, D, fract(seed.mul(5.31)), lit, lamp.mul(bright), office)
         room.assign(ri.color)
@@ -794,8 +824,9 @@ export function createNamedGlassMaterial() {
     If(kind.greaterThan(0.5).and(kind.lessThan(1.5)).or(kind.greaterThan(7.5)), () => {
       refl.mulAssign(vec3(0.62, 0.68, 0.72))
     })
-    const col = mix(room, refl.mul(0.75), clamp(fres.mul(0.75).add(0.05), 0.0, 0.8)).toVar()
-    col.addAssign(u.uSunLight.mul(pow(max(dot(R, u.uSunDir), 0.0), 400.0)).mul(2.5).mul(sh))
+    // 平らな塗りは映り込みときらめきを省く（ガラスの色は窓の式・ステンドグラス・障子のまま）
+    const col = (flatWindow ? vec3(room) : mix(room, refl.mul(0.75), clamp(fres.mul(0.75).add(0.05), 0.0, 0.8))).toVar()
+    if (!flatWindow) col.addAssign(u.uSunLight.mul(pow(max(dot(R, u.uSunDir), 0.0), 400.0)).mul(2.5).mul(sh))
     // 桟（縦 cols・横 rows の格子と枠。アーチの所は放射の桟）
     const cols = vGrid.x.toVar()
     const rows = vGrid.y.toVar()
@@ -834,7 +865,7 @@ export function createNamedGlassMaterial() {
       })
       frame.mulAssign(smoothstep(0.03, 0.08, px).oneMinus())
     })
-    col.assign(mix(col, townLight(vColor, N, float(0.9), sh), frame))
+    col.assign(mix(col, townLight(vColor, N, float(0.9), sh, 'frame'), frame))
     return outdoorHaze(col, wp)
   })()
   return m

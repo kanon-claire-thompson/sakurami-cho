@@ -40,6 +40,7 @@ import {
 import { oHash, oNoise, outdoorHaze, outdoorUniforms, skyColor, unlit, withUniforms } from '../materials'
 import { arrayUniform, bAlb, bNrm, namedSurface, surfaceVaryings, type SurfaceState } from '../named/namedMaterial'
 import { shadowTap, townShadow, townShadowUniforms } from '../town/shadows'
+import { outdoorPaint } from '../paint'
 
 type Node<T = unknown> = THREE.Node<T>
 type F = Node<'float'>
@@ -414,6 +415,9 @@ function interiorLight(u: InteriorUniforms) {
       const sun = interiorSun(wp, N)
       diffuse.assign(win.mul(mix(0.75, 1.0, ao)).add(o.uSunLight.mul(u.uISun).mul(sun)).add(lamp.acc).add(amb.mul(ao).mul(up.mul(0.35).add(0.75))))
     })
+    // 外の塗り（paint.ts）の interior を入れたら、光はそちら（つやの照り返し・映り込みは足さない）
+    const paint = outdoorPaint()
+    if (paint?.interior) return paint.interior(albedo.mul(metal.mul(-0.6).add(1.0)), diffuse, amb, N, ao)
     const col = albedo.mul(metal.mul(-0.6).add(1.0)).mul(diffuse).toVar()
     const f0 = mix(0.04, 0.7, metal).toVar()
     const fres = f0.add(f0.oneMinus().mul(pow(clamp(dot(N, V).oneMinus(), 0.0, 1.0), 5.0))).toVar()

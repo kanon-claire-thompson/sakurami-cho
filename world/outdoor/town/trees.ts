@@ -44,6 +44,7 @@ import { townLight } from './facades'
 import { depthMaterial, townShadow } from './shadows'
 import { townTextureUniforms } from './townTextures'
 import { townLampsEx } from './lamps'
+import { paintFlat } from '../paint'
 import type { TownTile } from './townData'
 import { LANE_CORRIDOR_HALF_W, laneCorridor, type CorridorHit } from '../../walk/laneCorridor'
 
@@ -270,6 +271,14 @@ export const leafShadow = Fn(([sh]: [F]) => {
   return mix(mix(0.3, 1.0, sh), 0.55, lowSun.mul(0.85))
 })
 
+/** 平らな塗りの葉の色（木の種類・季節の色 vLeaf に掛ける。葉の絵の平均の明るさのかわり） */
+const FLAT_LEAF = 0.19
+
+/**
+ * 平らな塗りの葉の影の受け方: 太陽が低い（朝夕）ほど、影の地図の縞が樹冠に出るので日なたに寄せる（leafShadow の 2 段の塗りの形）
+ */
+const flatLeafShadow = (sh: F) => max(sh, smoothstep(0.04, 0.24, outdoorUniforms.uSunDir.y).oneMinus())
+
 /** 葉の絵の読み方（2×2 の絵の番号と、その中の uv）。bias を渡すとミップマップを進めて読む（影の葉の形） */
 function foliage(uv: V2, cell: F, bias?: number) {
   const o = vec2(mod(cell, 2.0), floor(cell.div(2.0))).mul(0.5)
@@ -405,6 +414,7 @@ export function createTreeMaterials() {
   const near = unlit('townTreesNear', { side: THREE.DoubleSide, alphaToCoverage: true })
   near.positionNode = nearPosition
   near.colorNode = Fn(() => {
+    const flat = paintFlat()
     const wp = positionWorld.toVar()
     const N = normalize(vNormal).toVar()
     const V = normalize(cameraPosition.sub(wp)).toVar()
@@ -412,13 +422,23 @@ export function createTreeMaterials() {
     const ao = vAo.toVar()
     const leaf = vUv.z.greaterThan(-0.5).toVar()
     // 葉の絵は分岐の外で読む（ミップマップの微分が、分岐でばらばらの画素の組でも正しくなるように）
-    const f = foliage(vec2(vUv.x, vUv.y.oneMinus()), vUv.z).toVar()
-    const fa = foliageAlpha(f.a, vUv.xy, 0.12).toVar()
+    // 平らな塗り（外の塗り paint.ts の flat）は、葉の形をぼかして太らせ、葉の塊の形にする（細かい穴に輪郭線が細かく出ないように）
+    const f = (flat ? foliage(vec2(vUv.x, vUv.y.oneMinus()), vUv.z, 2.0) : foliage(vec2(vUv.x, vUv.y.oneMinus()), vUv.z)).toVar()
+    const fa = foliageAlpha(f.a, vUv.xy, flat ? 0.5 : 0.12).toVar()
     // 横から見た板（葉が点の列に見える）は消す
     const facing = abs(dot(normalize(vCardN), V))
     If(leaf.and(fa.mul(smoothstep(0.12, 0.4, facing)).lessThan(0.5)), () => {
       Discard()
     })
+    if (flat) {
+      // 平らな塗り（外の塗り paint.ts の flat）: 葉は木の種類・季節の色の塊（葉の絵は形だけ）、幹は 1 色
+      albedo.assign(select(leaf, vLeaf.mul(FLAT_LEAF), vec3(0.03, 0.024, 0.02)))
+      const sh = flatLeafShadow(townShadow(wp, N))
+      const col = townLight(albedo, N, ao, sh, 'tree').toVar()
+      col.addAssign(domeGlow(albedo, ao, wp, vSeed, select(leaf, float(1.0), float(0.0))))
+      col.addAssign(albedo.mul(townLampsEx(wp, N, float(0.0), float(0.45))).mul(0.8).mul(ao))
+      return outdoorHaze(col, wp)
+    }
     If(leaf.not(), () => {
       // 幹と枝: 樹皮の質感
       const bark = townTextureUniforms.uGndAlb.sample(vec2(vUv.x.mul(2.0), vUv.y)).depth(int(6)).rgb.mul(2.0)
@@ -493,6 +513,13 @@ export function createTreeMaterials() {
       N.assign(normalize(vRight.mul(q.x).add(vec3(0.0, 1.0, 0.0).mul(q.y.mul(0.8).add(0.25))).add(vToCam.mul(z.add(0.2)))))
       ao.assign(smoothstep(-0.1, 0.9, cuv.y).mul(0.55).add(0.45))
     })
+    if (paintFlat()) {
+      // 平らな塗り: 葉の色の塊を、樹冠を球とみなした法線で 3 段に（外の塗りの light）
+      albedo.assign(select(leafy, vLeaf.mul(FLAT_LEAF), vec3(0.03, 0.024, 0.02)))
+      const col = townLight(albedo, N, ao, flatLeafShadow(townShadow(wp, N)), 'tree').toVar()
+      col.addAssign(domeGlow(albedo, ao, wp, vSeed, select(leafy, float(1.0), float(0.0))))
+      return outdoorHaze(col, wp)
+    }
     const sh = leafShadow(townShadow(wp, N)).toVar()
     const col = townLight(albedo, N, ao, sh).add(albedo.mul(u.uSkyLight).mul(0.45).mul(ao)).toVar()
     const V = normalize(cameraPosition.sub(wp))

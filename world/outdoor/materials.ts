@@ -48,6 +48,7 @@ import { townLight } from './town/facades'
 import { townShadow } from './town/shadows'
 import { townTextureUniforms } from './town/townTextures'
 import { townLamps } from './town/lamps'
+import { outdoorPaint } from './paint'
 
 type Node<T = unknown> = THREE.Node<T>
 
@@ -148,8 +149,14 @@ export const oNoise = Fn(([p]: [Node<'vec2'>]) => {
   return mix(mix(oHash(i), oHash(i.add(vec2(1.0, 0.0))), u.x), mix(oHash(i.add(vec2(0.0, 1.0))), oHash(i.add(vec2(1.0, 1.0))), u.x), u.y)
 })
 
-/** 太陽の直射と空の光（ランバート。下向きの面には地面の照り返し） */
-export const outdoorShade = Fn(([albedo, N]: [Node<'vec3'>, Node<'vec3'>]) => {
+/** 太陽の直射と空の光（ランバート。下向きの面には地面の照り返し）。外の塗り（paint.ts）の light を入れたら、そちら */
+export const outdoorShade = (albedo: Node<'vec3'>, N: Node<'vec3'>): Node<'vec3'> => {
+  const p = outdoorPaint()
+  return p?.light ? p.light(albedo, N, float(1.0), float(1.0), 'other') : outdoorShadeBase(albedo, N)
+}
+
+/** 前の outdoorShade の式（外の塗りの式から読める） */
+export const outdoorShadeBase = Fn(([albedo, N]: [Node<'vec3'>, Node<'vec3'>]) => {
   const u = outdoorUniforms
   const ndl = max(dot(N, u.uSunDir), 0.0)
   const up = N.y.mul(0.5).add(0.5)
@@ -157,8 +164,14 @@ export const outdoorShade = Fn(([albedo, N]: [Node<'vec3'>, Node<'vec3'>]) => {
   return albedo.mul(u.uSunLight.mul(ndl).add(amb))
 })
 
-/** 空気遠近（遠いほど地平線の空の色に溶け込む）。wp = ワールドの位置 */
-export const outdoorHaze = Fn(([col, wp]: [Node<'vec3'>, Node<'vec3'>]) => {
+/** 空気遠近（遠いほど地平線の空の色に溶け込む）。wp = ワールドの位置。外の塗り（paint.ts）の haze を入れたら、そちら */
+export const outdoorHaze = (col: Node<'vec3'>, wp: Node<'vec3'>): Node<'vec3'> => {
+  const p = outdoorPaint()
+  return p?.haze ? p.haze(col, wp) : outdoorHazeBase(col, wp)
+}
+
+/** 前の outdoorHaze の式（外の塗りの式から読める） */
+export const outdoorHazeBase = Fn(([col, wp]: [Node<'vec3'>, Node<'vec3'>]) => {
   const u = outdoorUniforms
   const dv = wp.sub(cameraPosition).toVar()
   const d = length(dv).toVar()
@@ -170,8 +183,14 @@ export const outdoorHaze = Fn(([col, wp]: [Node<'vec3'>, Node<'vec3'>]) => {
   return mix(col, haze, f)
 })
 
-/** 空の色（方向 d。地平線 → 中ほど → 天頂の 3 段のグラデーションと、太陽の側の地平線の光、夜の町明かり） */
-export const skyColor = Fn(([d]: [Node<'vec3'>]) => {
+/** 空の色（方向 d。地平線 → 中ほど → 天頂の 3 段のグラデーションと、太陽の側の地平線の光、夜の町明かり）。外の塗り（paint.ts）の sky を入れたら、そちら */
+export const skyColor = (d: Node<'vec3'>): Node<'vec3'> => {
+  const p = outdoorPaint()
+  return p?.sky ? p.sky(d) : skyColorBase(d)
+}
+
+/** 前の skyColor の式（外の塗りの式から読める） */
+export const skyColorBase = Fn(([d]: [Node<'vec3'>]) => {
   const u = outdoorUniforms
   const h = max(d.y, 0.0).toVar()
   // 地平線の色は、太陽の側（朝夕の橙・桃色）と反対側（青紫）で変える
@@ -210,8 +229,8 @@ export function unlit(name: string, params: ConstructorParameters<typeof THREE.M
 /* 空                                                                           */
 /* -------------------------------------------------------------------------- */
 
-/** fbm（5 段の値のノイズ。雲） */
-const fbm = Fn(([p0]: [Node<'vec2'>]) => {
+/** fbm（5 段の値のノイズ。雲。外の塗りの式からも読める） */
+export const fbm = Fn(([p0]: [Node<'vec2'>]) => {
   const p = vec2(p0).toVar()
   const s = float(0).toVar()
   let a = 0.5
@@ -223,10 +242,19 @@ const fbm = Fn(([p0]: [Node<'vec2'>]) => {
   return s.div(0.96875)
 })
 
-/** 空のドーム（大きな球の内側）。雲（ノイズ）と太陽の円盤も描く。深度は書かない */
+/** 空のドーム（大きな球の内側）。雲（ノイズ）と太陽の円盤も描く。深度は書かない。外の塗り（paint.ts）の skyDome を入れたら、雲と太陽はそちら */
 export function createSkyMaterial(clouds: boolean) {
   const u = outdoorUniforms
   const m = unlit('outdoorSky', { side: THREE.BackSide, depthWrite: false })
+  const paint = outdoorPaint()
+  if (paint?.skyDome) {
+    const dome = paint.skyDome
+    m.colorNode = Fn(() => {
+      const d = normalize(positionWorld.sub(cameraPosition)).toVar()
+      return dome(d, skyColor(d))
+    })()
+    return m
+  }
   m.colorNode = Fn(() => {
     const d = normalize(positionWorld.sub(cameraPosition)).toVar()
     const col = skyColor(d).toVar()
@@ -308,16 +336,20 @@ export function createStructureMaterial() {
     const color = attribute<'vec3'>('color', 'vec3' as const)
     const emit = attribute<'vec4'>('aEmit', 'vec4')
     // 質感（三方向から投影。煉瓦色は煉瓦、ほかはコンクリート）と、雨の筋・足元の汚れ
-    const an = abs(N).toVar()
-    const p = select(an.y.greaterThan(0.7), wp.xz, select(an.x.greaterThan(an.z), wp.zy, wp.xy)).toVar()
-    const brick = step(color.g.mul(1.3), color.r).mul(step(0.12, color.r)).toVar()
-    const isBrick = brick.greaterThan(0.5)
-    const t = townTextureUniforms.uBldAlb.sample(p.div(select(isBrick, 2.0, 3.2))).depth(select(isBrick, 3, 4)).rgb.mul(2.0)
-    const det = pow(max(mix(vec3(1.0), t, 0.8), 0.0), vec3(2.2)).toVar()
-    const albedo = color.mul(mix(vec3(dot(det, vec3(0.2126, 0.7152, 0.0722))), det, brick.mul(0.3))).toVar()
-    const streak = smoothstep(0.55, 0.85, oNoise(vec2(p.x.mul(1.7), 0.5))).mul(an.y.oneMinus())
-    albedo.mulAssign(float(1.0).sub(streak.mul(0.18)).sub(smoothstep(0.0, 2.0, oNoise(p.mul(0.2)).mul(3.0)).oneMinus().mul(0.1)))
-    const col = townLight(albedo, N, 1.0, townShadow(wp, N)).toVar()
+    const albedo = vec3(color).toVar()
+    // 外の塗り（paint.ts）の flat のときは、質感・雨の筋・汚れを省く（頂点の色の平らな塗り）
+    if (!outdoorPaint()?.flat) {
+      const an = abs(N).toVar()
+      const p = select(an.y.greaterThan(0.7), wp.xz, select(an.x.greaterThan(an.z), wp.zy, wp.xy)).toVar()
+      const brick = step(color.g.mul(1.3), color.r).mul(step(0.12, color.r)).toVar()
+      const isBrick = brick.greaterThan(0.5)
+      const t = townTextureUniforms.uBldAlb.sample(p.div(select(isBrick, 2.0, 3.2))).depth(select(isBrick, 3, 4)).rgb.mul(2.0)
+      const det = pow(max(mix(vec3(1.0), t, 0.8), 0.0), vec3(2.2)).toVar()
+      albedo.assign(color.mul(mix(vec3(dot(det, vec3(0.2126, 0.7152, 0.0722))), det, brick.mul(0.3))))
+      const streak = smoothstep(0.55, 0.85, oNoise(vec2(p.x.mul(1.7), 0.5))).mul(an.y.oneMinus())
+      albedo.mulAssign(float(1.0).sub(streak.mul(0.18)).sub(smoothstep(0.0, 2.0, oNoise(p.mul(0.2)).mul(3.0)).oneMinus().mul(0.1)))
+    }
+    const col = townLight(albedo, N, float(1.0), townShadow(wp, N), 'structure').toVar()
     col.addAssign(albedo.mul(townLamps(wp, N)))
     const k = select(
       emit.w.lessThan(0.5),
@@ -459,10 +491,15 @@ export function createLightsMaterial(a: LightAttributes) {
   const vCoreR = varying(core.div(sprite))
   const c = uv().mul(2.0).sub(1.0)
   const r = length(c).toVar()
-  // 芯（後処理の bloom でにじむ明るさ）と、まわりのほのかなにじみ
-  const coreI = smoothstep(vCoreR.mul(0.45), vCoreR, r).oneMinus()
-  const halo = exp(r.mul(r).mul(-5.0)).mul(0.28)
-  m.colorNode = vec4(vCol.mul(coreI.mul(2.2).add(halo)).mul(step(r, 1.0)), 1.0)
+  // 芯（後処理の bloom でにじむ明るさ）と、まわりのほのかなにじみ（外の塗り（paint.ts）の glow を入れたら、そちら）
+  const glow = outdoorPaint()?.glow
+  if (glow) {
+    m.colorNode = vec4(vCol.mul(glow(r, vCoreR)).mul(step(r, 1.0)), 1.0)
+  } else {
+    const coreI = smoothstep(vCoreR.mul(0.45), vCoreR, r).oneMinus()
+    const halo = exp(r.mul(r).mul(-5.0)).mul(0.28)
+    m.colorNode = vec4(vCol.mul(coreI.mul(2.2).add(halo)).mul(step(r, 1.0)), 1.0)
+  }
   return withUniforms(m, uniforms)
 }
 

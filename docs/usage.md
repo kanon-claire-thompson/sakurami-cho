@@ -31,6 +31,7 @@ minor の版を上げる。
 | world | `createTown`・型 `Town`・`TownCreateOptions`・`TownStatus`・`TownClock`・`TownFocus`・`TownFrame`・`TownEventMap` | 町の口（1 ページに 1 つ。根の [README](../README.md) の「自分のアプリに入れる」）と、その引数・読み込みの状態・時計・注目点・毎コマの段（`begin`・`update`・`view` の引数）・出来事 |
 | world | `PALETTE`・`FONTS` | 背景と霧の色・ラボの看板と画面のフォント（下の「フォント」） |
 | world | `configureLab` | ラボの差し込み口（什器の入力の値・差し込み口の中身・画面の描き方・床の映り込みを描くか `floorReflection`。下の「ラボの素材の名前と床の映り込み」） |
+| world | `configureOutdoorPaint`・型 `OutdoorPaint`・`PaintSurface` | 外の塗りの口（町・空・水・地形・建物・木・乗り物・名前のある建物とその中の光と色の式を差し替える。入れなければ前の見た目のまま。下の「外の塗り」） |
 | world | `createFollowCamera`・型 `FollowCamera`・`FollowCameraOptions`・`FollowTarget` | 人を追うカメラ（下の「カメラ・直接の操作・ワープ」） |
 | character | `createCharacter`・型 `Character`・`CharacterOptions`・`CharacterSpawnPoint`・`CharacterDriver` | キャラクター（1 人ずつのインスタンス）と、毎コマ動かす所（`ch.drivers.motion`・`travel`）の型 |
 | character | `createCharacterVisual`・型 `CharacterVisual`・`CharacterVisualOptions`・`CharacterVisualStatus`・`CharacterVisualClip`・`VISUAL_DEFAULTS`・型 `VisualConfig` | 見た目（VRM と待機・歩き・跳ぶ・身ぶりの `.vrma`）と既定の値。`CharacterVisual` の `start()`・`stop()`・`update()`・片付ける `dispose()` |
@@ -72,6 +73,32 @@ LOST（消灯し、外周の表示灯が琥珀色）は `core: 0`・`amber: 1`�
   使う側は色ではなく名前で引く（同じ名前の素材は同じ役割。`test/lab-kits.test.ts` が名前の無い素材が無いことを確かめる）。動かない物を合わせた mesh の名前は `static:<素材の名前>`
 - 床の映り込み（品質 high）は、`configureLab({ floorReflection: false })` で作った時から止められる（毎コマ場面をもう 1 回描く・ぼかす仕事をしない。
   床は映り込みの無い PBR の床 `labFloor`）。あとから `lab.shell.floor.setReflection(on)` でも切り替えられる（`lab.shell.floor.reflection` が今の状態）。既定は描く
+
+## 外の塗り（`configureOutdoorPaint`）
+
+使う側が町の見た目を自分の塗り（アニメ塗りなど。kanon-stream-video の `src/scene/anime/town.ts`）に差し替えるための口。地図の既定の見た目は変えない:
+塗りを入れなければ（呼ばない・`null`）、どの材質も前とまったく同じ式を組む。
+
+- 入れるのは町の材質を作る前（`createTown` のあと、描き始める前）。材質を組み立てるとき（シェーダーを作るとき）に読むので、作り終えた材質はあとから替わらない
+- 式はどれも省ける（省いた式は前の式のまま）。式は TSL のノードを組む関数（呼んだ所に式が入る）。配色や時刻の値は、使う側が自分の uniform を作って式の中で読む。
+  前の式は `world/outdoor/materials.ts` の `skyColorBase`・`outdoorHazeBase`・`outdoorShadeBase`・`fbm`、`world/outdoor/town/facades.ts` の `townLightBase` として読める
+  （例: 前の空の色を高さの帯で塗り分ける）。太陽・空の光・空気の色は `outdoorUniforms`（時刻で連続に変わる）
+
+| 式 | 代わる物 | 引数 → 戻り値 |
+|---|---|---|
+| `light` | 太陽と空の光（`townLight`・`outdoorShade`。地面・建物・木・小物・構造物・名前のある建物・乗り物・ラボの外観） | 面の色・法線・環境光の遮り・太陽の影（1 = 日なた）・面の種類 `PaintSurface` → HDR の色 |
+| `haze` | 空気遠近（`outdoorHaze`） | 色・世界の位置 → 色 |
+| `sky` | 空の色（`skyColor`。空の球と、ガラス・水・車体の映り込み） | 向き → 色 |
+| `skyDome` | 空の球の雲と太陽の円盤 | 向き・`sky` の色 → 色 |
+| `window` | 窓のガラス（`flat` のとき。名前のない建物と名前のある建物） | 点いている度合い・灯りの色・面の法線・視線・窓の中の位置（0〜1）→ 色 |
+| `water` | 海・川・運河・池の水面（`flat` のとき） | 波の法線・視線・位置・海か・映った灯り → 色（空気遠近の前） |
+| `lampFalloff` | 街灯・提灯・店先の灯りが面を照らす強さの減り方（灯り 1 つごと） | 前の減衰・強さ・距離・届く距離 → 減衰 |
+| `glow` | 光の点（町の灯り・遠くの窓明かり）の芯とにじみの形 | 点の中心からの距離・芯の半径 → 明るさの倍率 |
+| `interior` | 中のある建物の中の光（拡散） | 面の色・照度の和・部屋のまわりの明るさ・法線・環境光の遮り → 色 |
+| `flat` | 細かい模様を省く | `true` で、質感の写真・汚れ・まだら・窓の奥の部屋とカーテン・水面の映り込み・つやの照り返しを描かない（窓の格子・枠・看板の帯・棟の帯は残す） |
+
+面の種類（`PaintSurface`）は `ground`・`wall`・`roof`・`frame`（窓枠・雨戸）・`structure`・`tree`・`grass`・`prop`・`named`・`site`・`vehicle`・`dome`・`other`。
+配色の表を物ごとに引くのに使う。
 
 ## 毎コマの順
 

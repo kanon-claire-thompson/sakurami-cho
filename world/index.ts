@@ -16,6 +16,9 @@ export { PALETTE } from './palette'
 export { FONTS } from './textures/canvas'
 // ラボの差し込み口（什器の入力の値・差し込み口の中身・画面）
 export { configureLab } from './lab/labHost'
+// 外の塗りの口（町・空・水・建物・木・乗り物・中のある建物の光と色の式を、使う側が差し替える。入れなければ前の見た目のまま）
+export { configureOutdoorPaint } from './outdoor/paint'
+export type { OutdoorPaint, PaintSurface } from './outdoor/paint'
 // 人を追うカメラ（例のアプリのために足した部品。段 6）
 export { createFollowCamera } from './followCamera'
 export type { FollowCamera, FollowCameraOptions, FollowTarget } from './followCamera'

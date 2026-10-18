@@ -55,6 +55,7 @@ import { townLight } from '../town/facades'
 import { townShadow } from '../town/shadows'
 import { townTextureUniforms } from '../town/townTextures'
 import { townLamps } from '../town/lamps'
+import { paintFlat } from '../paint'
 
 type Node<T = unknown> = THREE.Node<T>
 
@@ -323,7 +324,7 @@ function transitColor(builder: THREE.NodeBuilder) {
         const rd = normalize(vLocalView).toVar()
         const fres = pow(clamp(dot(N, V).oneMinus(), 0.0, 1.0), 5.0).mul(0.94).add(0.06).toVar()
         const R = reflect(V.negate(), N).toVar()
-        const refl = envRefl(R).add(u.uSunLight.mul(pow(max(dot(R, u.uSunDir), 0.0), 600.0)).mul(20.0).mul(smoothstep(-0.02, 0.05, u.uSunDir.y))).toVar()
+        const refl = (paintFlat() ? envRefl(R) : envRefl(R).add(u.uSunLight.mul(pow(max(dot(R, u.uSunDir), 0.0), 600.0)).mul(20.0).mul(smoothstep(-0.02, 0.05, u.uSunDir.y)))).toVar()
         const inside = vec3(0.0).toVar()
         const lit = info.y.mul(tu.uLampOn).toVar()
         If(aux.lessThan(0.5).and(abs(Nl.x).greaterThan(0.5)).and(dot(rd, Nl).lessThan(0.0)), () => {
@@ -447,11 +448,14 @@ function transitColor(builder: THREE.NodeBuilder) {
       })
     If(done.lessThan(0.5), () => {
       const sh = townShadow(wp, N).toVar()
-      const col = townLight(albedo.mul(metal.mul(-0.6).add(1.0)), N, ao, sh).toVar()
-      const fres = metalFresnel(metal, N, V).toVar()
-      col.addAssign(sunSpecular(N, V, gloss, fres, sh))
-      const R = reflect(V.negate(), N)
-      col.addAssign(envRefl(R).mul(fres).mul(mix(gloss.mul(0.5), 0.9, metal)).mul(mix(vec3(1.0), albedo.mul(2.0), metal)).mul(ao))
+      const col = townLight(albedo.mul(metal.mul(-0.6).add(1.0)), N, ao, sh, 'vehicle').toVar()
+      // 外の塗り（paint.ts）の flat のときは、つやの照り返し・映り込みを省く
+      if (!paintFlat()) {
+        const fres = metalFresnel(metal, N, V).toVar()
+        col.addAssign(sunSpecular(N, V, gloss, fres, sh))
+        const R = reflect(V.negate(), N)
+        col.addAssign(envRefl(R).mul(fres).mul(mix(gloss.mul(0.5), 0.9, metal)).mul(mix(vec3(1.0), albedo.mul(2.0), metal)).mul(ao))
+      }
       // 夜: 町の灯り
       col.addAssign(albedo.mul(townLamps(wp, N)))
       col.assign(outdoorHaze(col, wp))

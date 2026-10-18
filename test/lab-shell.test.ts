@@ -32,7 +32,7 @@ interface Frame {
 }
 interface Shell {
   object: THREE.Group
-  floor: { mesh: THREE.Mesh }
+  floor: { mesh: THREE.Mesh; reflection: boolean; setReflection(on: boolean): void }
   attach(): () => void
   update(dt: number, f: Frame): void
   dispose(): void
@@ -181,6 +181,25 @@ describe('ラボの殻（4-4）', () => {
     let renders = 0
     low.update(0.016, { time: 0, camera: new THREE.PerspectiveCamera(), renderer: fakeRenderer(() => renders++), scene: new THREE.Scene() })
     expect(renders).toBe(0)
+    expect(lm.name).toBe('labFloor')
+    expect(low.floor.reflection).toBe(false)
+  })
+
+  test('床の映り込みを止める口（setReflection）: 止めると毎コマ撮らず、床は映り込みの無い PBR の床（labFloor）。戻すと映り込みの素材に戻る', async () => {
+    const { shell } = await makeShell('high')
+    const reflector = shell.floor.mesh.material
+    expect(shell.floor.reflection).toBe(true)
+    shell.floor.setReflection(false)
+    expect(shell.floor.reflection).toBe(false)
+    const plain = shell.floor.mesh.material as THREE.MeshStandardMaterial
+    expect(plain.constructor).toBe(THREE.MeshStandardMaterial)
+    expect([plain.name, plain.roughness]).toEqual(['labFloor', 0.55])
+    let renders = 0
+    shell.update(0.016, { time: 0, camera: new THREE.PerspectiveCamera(), renderer: fakeRenderer(() => renders++), scene: new THREE.Scene() })
+    expect(renders).toBe(0)
+    shell.floor.setReflection(true)
+    expect(shell.floor.mesh.material).toBe(reflector)
+    shell.dispose()
   })
 
   test('attach で太陽の影を落とす物の印が付くのは、窓のある壁と柱・天井の板・見学エントランスだけ（ガラスと小さな部品は除く）', async () => {

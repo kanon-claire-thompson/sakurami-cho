@@ -69,8 +69,15 @@ const REFLECTOR = {
 
 export interface LabFloor {
   readonly mesh: THREE.Mesh
-  /** 床の映り込みを描く（high のときだけ。low なら何もしない） */
+  /** 床の映り込みを描く（high で映り込みを止めていないときだけ。low・止めているときは何もしない） */
   renderReflection(renderer: THREE.WebGPURenderer, scene: THREE.Scene, camera: THREE.Camera): void
+  /** 映り込みを描いているか（high で setReflection(false) していないとき） */
+  readonly reflection: boolean
+  /**
+   * 映り込みを止める・戻す（high のときだけ効く。low はいつも映り込み無し）。止めている間は毎コマの映り込みの描画（場面をもう 1 回描く・ぼかす）をせず、
+   * 床の素材を映り込みの無い PBR の床（low と同じ素材。名前 labFloor）に替える。使う側が床を自分の素材で描くとき（トゥーン調など）に、重さを減らす口
+   */
+  setReflection(on: boolean): void
   /** 撮る先・ぼかし・素材・形を捨てる（床のテクスチャは使う側の物なので捨てない） */
   dispose(): void
 }
@@ -100,11 +107,13 @@ function holdShadows(scene: THREE.Object3D): ShadowLight[] {
 export function createLabFloor(o: { textures: LabFloorTextures; quality: 'high' | 'low' }): LabFloor {
   const geometry = new THREE.PlaneGeometry(ROOM.width, ROOM.depth)
   if (o.quality !== 'high') {
-    const material = new THREE.MeshStandardMaterial({ ...o.textures, color: '#8d949c', normalScale: new THREE.Vector2(0.6, 0.6), roughness: 0.55, metalness: 0 })
+    const material = plainFloorMaterial(o.textures)
     const mesh = floorMesh(geometry, material)
     return {
       mesh,
       renderReflection() {},
+      reflection: false,
+      setReflection() {},
       dispose() {
         geometry.dispose()
         material.dispose()
@@ -114,14 +123,34 @@ export function createLabFloor(o: { textures: LabFloorTextures; quality: 'high' 
   const reflection = createReflector(o.textures.map)
   const mesh = floorMesh(geometry, reflection.material)
   mesh.add(reflection.target)
+  /** 映り込みを止めたときの床の素材（初めて止めた時に作る） */
+  let plain: THREE.MeshStandardMaterial | null = null
+  let on = true
   return {
     mesh,
-    renderReflection: (renderer, scene, camera) => reflection.render(mesh, renderer, scene, camera),
+    renderReflection: (renderer, scene, camera) => {
+      if (on) reflection.render(mesh, renderer, scene, camera)
+    },
+    get reflection() {
+      return on
+    },
+    setReflection(next) {
+      if (next === on) return
+      on = next
+      plain ??= plainFloorMaterial(o.textures)
+      mesh.material = on ? reflection.material : plain
+    },
     dispose() {
       geometry.dispose()
       reflection.dispose()
+      plain?.dispose()
     },
   }
+}
+
+/** 映り込みの無い PBR の床（low の床と、high で映り込みを止めたときの床） */
+function plainFloorMaterial(textures: LabFloorTextures) {
+  return new THREE.MeshStandardMaterial({ ...textures, name: 'labFloor', color: '#8d949c', normalScale: new THREE.Vector2(0.6, 0.6), roughness: 0.55, metalness: 0 })
 }
 
 function floorMesh(geometry: THREE.BufferGeometry, material: THREE.Material) {

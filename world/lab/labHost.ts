@@ -48,15 +48,26 @@ export interface LabHostOptions {
   screens?: {
     [name: string]: ScreenDraw | undefined
   }
+  /**
+   * 床の映り込み（high のとき）を描くか（既定 true）。false なら作った時から止める（毎コマ場面をもう 1 回描かない。床は映り込みの無い PBR の床）。
+   * 使う側が床を自分の素材で描くとき（トゥーン調など）に。あとから lab.shell.floor.setReflection でも切り替えられる
+   */
+  floorReflection?: boolean
 }
 
 const options: LabHostOptions = { channels: {}, slots: {}, screens: {} }
 
 /** ラボの口に入れる（使う側が起動のとき、ラボを作る前に。入れた名前だけ差し替える） */
-export function configureLab(next: { channels?: LabHostOptions['channels']; slots?: LabHostOptions['slots']; screens?: LabHostOptions['screens'] }) {
+export function configureLab(next: {
+  channels?: LabHostOptions['channels']
+  slots?: LabHostOptions['slots']
+  screens?: LabHostOptions['screens']
+  floorReflection?: boolean
+}) {
   if (next.channels) Object.assign(options.channels, next.channels)
   if (next.slots) Object.assign(options.slots, next.slots)
   if (next.screens) Object.assign(options.screens!, next.screens)
+  if (next.floorReflection !== undefined) options.floorReflection = next.floorReflection
 }
 
 /** ラボの口に入っている物（ラボを作る時に読む） */

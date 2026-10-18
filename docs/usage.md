@@ -30,7 +30,7 @@ minor の版を上げる。
 | core | `LAB_PLACEMENTS`・型 `LabPlacement`・`labAnchor`・型 `LabAnchorData` | ラボの置き場所の表（地図の既定。使う側が足した表を react の `TownRoot` の `placements` に渡す）とアンカーを引く |
 | world | `createTown`・型 `Town`・`TownCreateOptions`・`TownStatus`・`TownClock`・`TownFocus`・`TownFrame`・`TownEventMap` | 町の口（1 ページに 1 つ。根の [README](../README.md) の「自分のアプリに入れる」）と、その引数・読み込みの状態・時計・注目点・毎コマの段（`begin`・`update`・`view` の引数）・出来事 |
 | world | `PALETTE`・`FONTS` | 背景と霧の色・ラボの看板と画面のフォント（下の「フォント」） |
-| world | `configureLab` | ラボの差し込み口（什器の入力の値・差し込み口の中身・画面の描き方） |
+| world | `configureLab` | ラボの差し込み口（什器の入力の値・差し込み口の中身・画面の描き方・床の映り込みを描くか `floorReflection`。下の「ラボの素材の名前と床の映り込み」） |
 | world | `createFollowCamera`・型 `FollowCamera`・`FollowCameraOptions`・`FollowTarget` | 人を追うカメラ（下の「カメラ・直接の操作・ワープ」） |
 | character | `createCharacter`・型 `Character`・`CharacterOptions`・`CharacterSpawnPoint`・`CharacterDriver` | キャラクター（1 人ずつのインスタンス）と、毎コマ動かす所（`ch.drivers.motion`・`travel`）の型 |
 | character | `createCharacterVisual`・型 `CharacterVisual`・`CharacterVisualOptions`・`CharacterVisualStatus`・`CharacterVisualClip`・`VISUAL_DEFAULTS`・型 `VisualConfig` | 見た目（VRM と待機・歩き・跳ぶ・身ぶりの `.vrma`）と既定の値。`CharacterVisual` の `start()`・`stop()`・`update()`・片付ける `dispose()` |
@@ -61,6 +61,17 @@ minor の版を上げる。
 `core`・`amber` は、設定（vol6 3-8）の状態の表示を外から作るための値。たとえば STANDBY（淡い緑の呼吸光）は `core` を 0.2〜0.45 くらいでゆっくり上下させる、
 LOST（消灯し、外周の表示灯が琥珀色）は `core: 0`・`amber: 1`。呼吸・明滅の形（時間の動き）は地図では決めず、使う側が毎コマの値で作る。
 既定の 1・0 では前と同じ見た目（反射用の環境の光る板は、コアの明るさで変えない）。
+
+## ラボの素材の名前と床の映り込み
+
+使う側がラボの見た目を自分の素材に差し替える（トゥーン調・アニメ塗りなど。kanon-stream-video の `src/scene/anime/`）ための口。地図の既定の見た目は変えない。
+
+- ラボの光を受ける素材（`MeshStandardMaterial`・`MeshPhysicalMaterial`）には、どれも名前（`material.name`）が付いている。共有の素材は
+  `world/materials/labMaterials.ts` の欄の名前（`wallPanel`・`darkMetal`・`steel` など）、殻と什器がじかに作る物は役割の名前（`wallBacking`・`ceiling`・
+  `mezzanineFloor`・`floorSeam`・`visionGlass`・`cuttingMat`・`keycap`・`mugCeramic`・`pottingSoil`・`leaf` など）。床は `labFloorReflector`（映り込み）か `labFloor`。
+  使う側は色ではなく名前で引く（同じ名前の素材は同じ役割。`test/lab-kits.test.ts` が名前の無い素材が無いことを確かめる）。動かない物を合わせた mesh の名前は `static:<素材の名前>`
+- 床の映り込み（品質 high）は、`configureLab({ floorReflection: false })` で作った時から止められる（毎コマ場面をもう 1 回描く・ぼかす仕事をしない。
+  床は映り込みの無い PBR の床 `labFloor`）。あとから `lab.shell.floor.setReflection(on)` でも切り替えられる（`lab.shell.floor.reflection` が今の状態）。既定は描く
 
 ## 毎コマの順
 

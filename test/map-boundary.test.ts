@@ -26,7 +26,7 @@
  *     下の .ts を読まない）。待機・歩き・跳ぶの書き出し先は character/avatar/visualConfig.ts の VISUAL_DEFAULTS.animations と同じ値（8-4）
  *   - 書き出したアセット（町の地図データ assets/town/・.vrma の assets/models/animations/）は git に入れる（地図のリポジトリだけで町が出るように。
  *     段 6 の前に決めた。§8）。.gitignore で外さず、git の作業ツリーなら書き出した物が全部 git に入っている（sync で作り直したら差としてコミットする）。
- *     .vrma は出典（assets/models/animations/CREDITS.md）にファイルごとに書く。パッケージに置く .vrma は、パッケージのコードが既定で使う待機・歩き・跳ぶまで
+ *     .vrma は出典（assets/models/animations/CREDITS.md）にファイルごとに書く。パッケージに置く .vrma は、パッケージのコードが既定で使う待機（切り替える待機を含む）・歩き・跳ぶまで
  *   - package.json の形（exports・files・peer の範囲・sideEffects を書かない・scripts・devDependencies）と .gitignore、three などが例のアプリとパッケージで
  *     同じ本当の置き場所に解けること
  *   - パッケージの名前は sakurami-cho（段 8 の 8-1 で、前の @kanon のスコープの付いた名前から替えた）。前の名前の字を残さない
@@ -734,23 +734,24 @@ describe('地図のパッケージ（入口ごとの決まり）', () => {
     expect(specs.filter((s) => !s.startsWith('node:') && packageNameOf(s) !== 'three')).toEqual([])
     // 値を 2 か所に書くので、食い違ったら落とす（.ts の側が元。道具の側は写し）
     const load = async <T>(path: string): Promise<T> => (await import(join(ROOT, path))) as T
-    const convert = await load<{ IDLE_OUTPUT: { dest: string }; WALK_OUTPUT: { dest: string }; JUMP_OUTPUTS: { dest: string }[] }>('tools/anim/convert.mjs')
-    const { VISUAL_DEFAULTS } = await load<{ VISUAL_DEFAULTS: { animations: { idle: string; walk: string; jump: { start: string; loop: string; land: string } } } }>('character/avatar/visualConfig.ts')
+    const convert = await load<{ IDLE_OUTPUT: { dest: string }; IDLE_VARIANT_OUTPUTS: { dest: string }[]; WALK_OUTPUT: { dest: string }; JUMP_OUTPUTS: { dest: string }[] }>('tools/anim/convert.mjs')
+    const { VISUAL_DEFAULTS } = await load<{ VISUAL_DEFAULTS: { animations: { idle: string; idleVariants: readonly string[]; walk: string; jump: { start: string; loop: string; land: string } } } }>('character/avatar/visualConfig.ts')
     expect(convert.IDLE_OUTPUT.dest).toBe(VISUAL_DEFAULTS.animations.idle)
+    expect(convert.IDLE_VARIANT_OUTPUTS.map((o) => o.dest)).toEqual([...VISUAL_DEFAULTS.animations.idleVariants])
     expect(convert.WALK_OUTPUT.dest).toBe(VISUAL_DEFAULTS.animations.walk)
     const jump = VISUAL_DEFAULTS.animations.jump
     expect(convert.JUMP_OUTPUTS.map((o) => o.dest)).toEqual([jump.start, jump.loop, jump.land])
   })
 
-  test('書き出したアセット（町の地図データ・.vrma）は git に入っていて（sync で作り直したら差としてコミットする）、.vrma の出典がファイルごとにある。パッケージの .vrma は待機・歩き・跳ぶまで', () => {
+  test('書き出したアセット（町の地図データ・.vrma）は git に入っていて（sync で作り直したら差としてコミットする）、.vrma の出典がファイルごとにある。パッケージの .vrma は待機（切り替える待機を含む）・歩き・跳ぶまで', () => {
     const town = 'assets/town'
     const anim = 'assets/models/animations'
     for (const f of ['manifest.json', 'walk.json', 'named.json', 'infra.json']) expect(existsSync(join(ROOT, town, f))).toBe(true)
     const pkgVrma = filesUnder(anim, /\.vrma$/)
     const written = [...filesUnder(town, /./), ...pkgVrma]
     expect(written.length).toBeGreaterThan(100)
-    // パッケージに置く .vrma は、パッケージのコードが既定で使う待機・歩き・跳ぶまで。花音の身ぶり（gesture-*）を地図へ戻さない・見比べる用の物を置かない
-    expect(pkgVrma.map((f) => posix.basename(f)).sort()).toEqual(['idle.vrma', 'jump-land.vrma', 'jump-loop.vrma', 'jump-start.vrma', 'walk.vrma'])
+    // パッケージに置く .vrma は、パッケージのコードが既定で使う待機（切り替える待機を含む）・歩き・跳ぶまで。花音の身ぶり（gesture-*）を地図へ戻さない・見比べる用の物を置かない
+    expect(pkgVrma.map((f) => posix.basename(f)).sort()).toEqual(['idle-2.vrma', 'idle-3.vrma', 'idle-4.vrma', 'idle.vrma', 'jump-land.vrma', 'jump-loop.vrma', 'jump-start.vrma', 'walk.vrma'])
     // パッケージの .gitignore で書き出した物を外さない（前の決め（5-9）はパッケージの .gitignore で外していた）
     const ignores = filesUnder('', /^\.gitignore$/, ['node_modules', '.git'])
     expect(ignores).toContain('.gitignore')

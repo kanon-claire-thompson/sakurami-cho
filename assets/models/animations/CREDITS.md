@@ -1,7 +1,7 @@
 # モーションの出典（assets/models/animations/）
 
-`assets/models/animations/` の `.vrma`（キャラクターの見た目が既定で使う待機・歩き・跳ぶ）は、下の自由に使える素材のモーションから `tools/sync-anim.mjs` が作った物です
-（素材から `.vrma` を作る変換は `tools/anim/convert.mjs`。素材ごとの設定は `SOURCES`、どの素材のどのアニメーションを使うかは `IDLE_OUTPUT`・`WALK_OUTPUT`・`JUMP_OUTPUTS`）。
+`assets/models/animations/` の `.vrma`（キャラクターの見た目が既定で使う待機・切り替える待機・歩き・跳ぶ）は、下の自由に使える素材のモーションから `tools/sync-anim.mjs` が作った物です
+（素材から `.vrma` を作る変換は `tools/anim/convert.mjs`。素材ごとの設定は `SOURCES`、どの素材のどのアニメーションを使うかは `IDLE_OUTPUT`・`IDLE_VARIANT_OUTPUTS`・`WALK_OUTPUT`・`JUMP_OUTPUTS`）。
 骨の向きを VRM の T ポーズの基準にそろえ、ループにつなぐ・震えをならす などの手を加えています（手の加え方は `tools/anim/convert.mjs` の頭のコメント）。
 
 ## 素材
@@ -21,12 +21,15 @@ CC0 の素材は表記が要らないが、感謝をこめて書いておく。
 | ファイル | 中身 | 素材 | 素材の中のアニメーション |
 |---|---|---|---|
 | `idle.vrma` | 待機のループ | StayStill（MIT） | `wei_lr_16` と `wei_rl_16`（16 番の人の左右への体重移動）をつないだ物 |
+| `idle-2.vrma` | 切り替える待機のループ（体重を移しながら、ときどき横を見る） | StayStill（MIT） | 待機のフォルダの `idle_25` の 0〜14 秒 |
+| `idle-3.vrma` | 切り替える待機のループ（片方の脚に体重を預けた、くつろいだ立ち方） | StayStill（MIT） | 待機のフォルダの `idle_34` の 1〜15 秒 |
+| `idle-4.vrma` | 切り替える待機のループ（ゆっくり大きく体重を移す） | StayStill（MIT） | 待機のフォルダの `idle_06` の 12〜26 秒 |
 | `walk.vrma` | 歩き（その場で歩くループ） | Universal Animation Library（CC0） | `Walk_Loop` |
 | `jump-start.vrma` | 跳ぶ: 踏み切り（しゃがんだ所から伸びて上がる。1 回） | Universal Animation Library（CC0） | `Jump_Start` |
 | `jump-loop.vrma` | 跳ぶ: 跳んでいる間（ループ） | Universal Animation Library（CC0） | `Jump_Loop` |
 | `jump-land.vrma` | 跳ぶ: 着く（脚を伸ばして着き、しゃがんで立つ。1 回） | Universal Animation Library（CC0） | `Jump_Land` |
 
-StayStill から作った `.vrma`（`idle.vrma`）には、glTF の `asset.copyright` にも著作権の表示（`Motion data from the StayStill dataset. Copyright (c) 2026 Eneko Atxa Landa. MIT License.`）を入れている。
+StayStill から作った `.vrma`（`idle.vrma`・`idle-2.vrma`〜`idle-4.vrma`）には、glTF の `asset.copyright` にも著作権の表示（`Motion data from the StayStill dataset. Copyright (c) 2026 Eneko Atxa Landa. MIT License.`）を入れている。
 
 ## StayStill のライセンス（全文。Zenodo の LICENSE.txt のまま）
 

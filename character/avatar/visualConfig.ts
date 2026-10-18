@@ -16,6 +16,11 @@ export const VISUAL_DEFAULTS = {
    */
   animations: {
     idle: 'models/animations/idle.vrma',
+    /**
+     * 待機に足して切り替える .vrma（idle と一緒に、idleMix の決まりで切り替える。読めない物は飛ばし、1 本も読めなければ idle だけ）。
+     * どれも idle と同じ立つ場所（両足の真ん中）に合わせて作ってある（tools/anim/convert.mjs の IDLE_VARIANT_OUTPUTS。align: 'standing'）
+     */
+    idleVariants: ['models/animations/idle-2.vrma', 'models/animations/idle-3.vrma', 'models/animations/idle-4.vrma'],
     walk: 'models/animations/walk.vrma',
     /**
      * 跳ぶ（character/avatar/jump.ts。使う側が jump を呼んだときだけ）: 踏み切り（start。しゃがんだ所から伸びて上がる）・跳んでいる間（loop）・着く（land）。
@@ -111,6 +116,12 @@ export const VISUAL_DEFAULTS = {
     outlineWidthScale: 0.35,
   },
 
+  /**
+   * 待機を切り替える決まり（character/avatar/idleMix.ts）: 枠ごとに待機を決まった乱数（seed）で選び、1 つの枠は minSlot 秒以上（短い待機は繰り返す）、
+   * 入れ替えに fade 秒かける。時刻はシーンの時計なので、撮影で同じ画になる
+   */
+  idleMix: { fade: 1.6, minSlot: 14, seed: 2035 },
+
   /** 影を落とす */
   castShadow: true,
 } as const
@@ -118,7 +129,7 @@ export const VISUAL_DEFAULTS = {
 /** 見た目の共通の設定の形（欄ごとに置き換えられる） */
 export interface VisualConfig {
   /** jump を省けば、跳ぶ姿勢はコードで作った物 */
-  animations: { idle: string; walk: string; jump?: { start: string; loop: string; land: string } }
+  animations: { idle: string; idleVariants?: readonly string[]; walk: string; jump?: { start: string; loop: string; land: string } }
   normalizeHeight: boolean
   allowedHeightError: number
   eyeHeightRatio: number
@@ -136,6 +147,7 @@ export interface VisualConfig {
   }
   steady: { headFraction: readonly [number, number]; amount: number; max: number }
   idle: VisualIdleConfig
+  idleMix: { fade: number; minSlot: number; seed: number }
   blink: string
   mtoon: VrmMtoonConfig
   castShadow: boolean

@@ -154,11 +154,16 @@ Orbitron の 500・700・900 を最大 3 秒待つ。町の看板・名前のあ
 |---|---|---|
 | `assets/textures/` | 入れる | CC0 の PBR テクスチャ（Poly Haven・ambientCG）。出典は [assets/textures/CREDITS.md](../assets/textures/CREDITS.md) |
 | `assets/town/` | 入れる | `tools/sync-town.mjs` が、設定資料の町の地図データ（このリポジトリには入れていない元のデータ）から書き出す（151 ファイル・約 25MB） |
-| `assets/models/animations/` | 入れる | `tools/sync-anim.mjs` が自由に使える素材から作る（キャラクターの見た目が既定で使う待機 `idle.vrma`・歩き `walk.vrma` と、跳ぶ `jump-start.vrma`・`jump-loop.vrma`・`jump-land.vrma` の 5 つ）。出典は [assets/models/animations/CREDITS.md](../assets/models/animations/CREDITS.md) |
+| `assets/models/animations/` | 入れる | `tools/sync-anim.mjs` が自由に使える素材から作る（キャラクターの見た目が既定で使う待機 `idle.vrma` と切り替える待機 `idle-2.vrma`〜`idle-4.vrma`・歩き `walk.vrma` と、跳ぶ `jump-start.vrma`・`jump-loop.vrma`・`jump-land.vrma` の 8 つ）。出典は [assets/models/animations/CREDITS.md](../assets/models/animations/CREDITS.md) |
 
 ここに置くのは、パッケージのコードが既定で使う物と、例のアプリで使う物まで（使う側のキャラクターに固有の物は、使う側の public に置く）。
 
 `.vrma` の素材（`tools/anim/convert.mjs` の `SOURCES`）: 待機は StayStill（MIT ライセンス。Copyright (c) 2026 Eneko Atxa Landa。作った `.vrma` の
 glTF の `asset.copyright` にも著作権の表示を入れる）、歩きは Quaternius の Universal Animation Library の Standard 版（CC0）。
-`SOURCES` には Universal Animation Library 2 の Standard 版（CC0）もあり、使う側が自分の `.vrma`（腕組みの身ぶりなど）を作るときに使える。
+`SOURCES` には Universal Animation Library 2 の Standard 版（CC0）と CMU Graphics Lab Motion Capture Database（cgspeed の BVH の版。複製・改変・再配布してよく、
+商用の製品に入れてよい。データそのものは売らない。謝辞の文を出典に書く）もあり、使う側が自分の `.vrma`（腕組み・喜ぶ・手を振るなど）を作るときに使える。
+
+待機の切り替え: `animations.idleVariants` の `.vrma` が読めれば、`animations.idle` と合わせて、決まった乱数とシーンの時計で枠ごとに待機を選び、
+`idleMix.fade` 秒かけて入れ替える（`character/avatar/idleMix.ts`。1 つの枠は `idleMix.minSlot` 秒以上。同じ時刻なら同じ画になる）。
+寄りの画で揺れを弱める `steady` は、切り替えの強さで混ぜた待機の平均の姿勢へ寄せる。切り替えをやめるなら `animations` の `idleVariants` を `[]` にする。
 ファイルごとの素材と MIT の全文は `assets/models/animations/CREDITS.md`。取ってきたライセンスの文書に MIT / CC0 と書いてあるかは、道具が作るときに確かめる。

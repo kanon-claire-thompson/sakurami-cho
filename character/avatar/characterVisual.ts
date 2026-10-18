@@ -14,6 +14,7 @@ import { applyFootIk, type FootIkState } from './footIk'
 import { applyTurnStepPose, createTurnStepPose } from './turnStepPose'
 import { applyJumpPose, createJumpClipWeights, createJumpLook, jumpClipWeights, jumpCodeAmounts, updateJumpLook } from './jumpPose'
 import { loadVrmAnimation } from './vrmAnimation'
+import { IdleMix, type IdleMixEntry } from './idleMix'
 import { VISUAL_DEFAULTS, type VisualConfig } from './visualConfig'
 import type { Car } from '../../world/outdoor/transit/vehicle'
 
@@ -48,6 +49,8 @@ import type { Car } from '../../world/outdoor/transit/vehicle'
  *   読めていない・待機の .vrma が無いときは、コードの姿勢（しゃがむ → 伸びる → 着いてしゃがむ）を重ねる。跳んでいる間は足の高さ合わせを弱める
  * - その場で向きを変える足踏み（ch.motion.step。character/avatar/turnStep.ts）: 床に残る足をその場に留め、持ち上げた足を次の所へ運ぶ
  *   （character/avatar/turnStepPose.ts。行動の姿勢を作った後・足の高さ合わせの前）
+ * - 待機を何本か切り替える（animations.idleVariants の .vrma が読めたとき。character/avatar/idleMix.ts）: 待機の 1 本目と足した待機を、決まった乱数と
+ *   シーンの時計（update の t）で枠ごとに選び、idleMix.fade 秒かけて強さを入れ替える（再生する所もシーンの時計から決めるので、撮影で同じ画になる）
  * - 寄りの画では待機の体の揺れを弱める（steady。顔のアップ = 頭が画の縦の steady.headFraction の割合を占めるほど強く、待機の .vrma の腰・背骨・首・脚を
  *   クリップの平均の姿勢へ steady.amount まで寄せる。層の steady（花音は話している間）は、腰から上の画（medium・close）でその分を足す。引きの画はそのまま）
  * - 姿勢の仕上げ（層の adjust。花音は顔・頭に触れる身ぶりで手を顔の目印へ届かせる）: 首・視線の後、表情と vrm.update の前
@@ -103,6 +106,12 @@ export interface CharacterVisualRig {
   jump: { start: THREE.AnimationAction; loop: THREE.AnimationAction; land: THREE.AnimationAction } | null
   /** 待機の .vrma の平均の姿勢（腰・背骨・首・脚。寄りの画で体の揺れを弱めるときに寄せる先） */
   idleMean: IdleMeanBone[]
+  /**
+   * 切り替える待機（0 番が idle。animations.idleVariants が 1 本も読めなければ空）と、切り替えの順番。
+   * それぞれの平均の姿勢（mean）は、切り替えの強さで混ぜて steady の寄せる先にする
+   */
+  idles: { action: THREE.AnimationAction; duration: number; mean: IdleMeanBone[] }[]
+  idleMix: IdleMix | null
 }
 
 /** 待機の .vrma の平均の姿勢（1 本の骨） */
@@ -317,6 +326,9 @@ class VrmCharacterVisual implements CharacterVisual {
   private readonly turnPose = createTurnStepPose()
   // 寄りの画で待機の揺れを弱める今の強さ（なめらかに）
   private steadyNow = 0
+  // 待機を切り替えるときの、そのコマの待機の強さと、混ぜた平均の姿勢（steady の寄せる先）
+  private readonly idleEntries: IdleMixEntry[] = []
+  private steadyMix: IdleMeanBone[] = []
   // 跳ぶ姿勢の様子と、跳ぶ .vrma の時刻と強さ（character/avatar/jumpPose.ts）
   private readonly jumpLook = createJumpLook()
   private readonly jumpWeights = createJumpClipWeights()
@@ -440,6 +452,8 @@ class VrmCharacterVisual implements CharacterVisual {
         loadVrmAnimation(assetUrl(base, cfg.animations.idle), loaded),
         loadVrmAnimation(assetUrl(base, cfg.animations.walk), loaded),
       ])
+      // 切り替える待機（待機の .vrma があるときだけ。読めなかった物は飛ばす）
+      const variantClips = idleClip ? await Promise.all((cfg.animations.idleVariants ?? []).map((u) => loadVrmAnimation(assetUrl(base, u), loaded))) : []
       // 立ったままの全身の身ぶり（待機の .vrma があるときだけ。無ければコードの待機の上には重ねない）
       const motionClips = idleClip && clips ? await Promise.all(clips.map(async (c) => [c, await loadVrmAnimation(assetUrl(base, c.url), loaded)] as const)) : []
       // 跳ぶ（待機の .vrma があるときだけ。3 本とも読めなければ、コードの姿勢）
@@ -475,11 +489,28 @@ class VrmCharacterVisual implements CharacterVisual {
         })
         jump = { start, loop, land }
       }
+      // 切り替える待機: 再生する所はシーンの時計から毎フレーム入れる（mixer には進めさせない）
+      const idles: CharacterVisualRig['idles'] = []
+      let idleMix: IdleMix | null = null
+      const variants = variantClips.filter((c) => c !== null)
+      if (mixer && idle && idleClip && variants.length) {
+        idles.push({ action: idle.setEffectiveTimeScale(0), duration: idleClip.clip.duration, mean: idleMeanPose(loaded, idleClip.clip) })
+        for (const c of variants) {
+          const action = mixer.clipAction(c.clip).setEffectiveWeight(0).setEffectiveTimeScale(0)
+          action.play()
+          idles.push({ action, duration: c.clip.duration, mean: idleMeanPose(loaded, c.clip) })
+        }
+        idleMix = new IdleMix(
+          idles.map((c) => c.duration),
+          cfg.idleMix,
+        )
+        this.steadyMix = idles[0].mean.map((b) => ({ node: b.node, q: b.q.clone(), p: b.p?.clone() ?? null }))
+      }
       // 速さの情報が無い .vrma は、決まり（WALK_SPEED で歩くループ）どおりとみなす
       const walkSpeed = walkClip?.walkSpeed ?? WALK_SPEED
       if (mixer) {
         const speedNote = walkClip ? `（1 倍で ${walkSpeed.toFixed(2)} m/s）` : ''
-        console.info(`[sakurami-cho] VRM アニメーション: 待機 ${idle ? 'あり' : 'なし'} / 歩き ${walk ? 'あり' : 'なし'}${speedNote} / 身ぶり ${motions.size} 本 / 跳ぶ ${jump ? 'あり' : 'なし（コードの姿勢）'}`)
+        console.info(`[sakurami-cho] VRM アニメーション: 待機 ${idle ? (idles.length ? `${idles.length} 本を切り替え` : 'あり') : 'なし'} / 歩き ${walk ? 'あり' : 'なし'}${speedNote} / 身ぶり ${motions.size} 本 / 跳ぶ ${jump ? 'あり' : 'なし（コードの姿勢）'}`)
       }
       const r: CharacterVisualRig = {
         hands: createHandsRig(loaded),
@@ -494,6 +525,8 @@ class VrmCharacterVisual implements CharacterVisual {
         motions,
         jump,
         idleMean: idle && idleClip ? idleMeanPose(loaded, idleClip.clip) : [],
+        idles,
+        idleMix,
       }
       this.rig = r
       // シーンに置き、表情を読み込んだ VRM につなぎ、層の読み込み時の準備を付けた順に（花音はペンダント → 表情 → 工具 → ?debug の道具。Object3D・material を作る順）
@@ -611,6 +644,23 @@ class VrmCharacterVisual implements CharacterVisual {
     // カメラを切り替えたコマで急に変わらないよう、0.3 秒ほどで
     this.steadyNow += (want - this.steadyNow) * (1 - Math.exp(-Math.min(delta, 0.1) * 8))
     return this.steadyNow
+  }
+
+  /** 切り替えている待機の平均の姿勢を、そのコマの強さで混ぜる（steady の寄せる先。入れ物は読み込んだときに作った steadyMix） */
+  private mixedIdleMean(r: CharacterVisualRig, entries: readonly IdleMixEntry[]) {
+    const out = this.steadyMix
+    const a = r.idles[entries[0].index].mean
+    const b = entries.length > 1 ? r.idles[entries[1].index].mean : null
+    const w = b ? entries[1].weight : 0
+    for (let i = 0; i < out.length; i++) {
+      const o = out[i]
+      const from = a.find((x) => x.node === o.node)
+      const to = b?.find((x) => x.node === o.node) ?? from
+      if (!from || !to) continue
+      o.q.copy(from.q).slerp(to.q, w)
+      if (o.p && from.p && to.p) o.p.copy(from.p).lerp(to.p, w)
+    }
+    return out
   }
 
   /** 取り消した読み込みの VRM が届いた: dispose() のあとなら、すぐ片付ける（stop() だけなら今までどおり何もしない） */
@@ -744,7 +794,19 @@ class VrmCharacterVisual implements CharacterVisual {
       }
       // 待機と歩きを歩きの強さで混ぜ、進む速さに合わせて再生の速さを変える（足が床を滑らないように）。
       // 立ったままの全身の身ぶりは、その上にその強さで重ねる（1 回だけ。繰り返すアニメーション（腕組み）は身ぶりの長さだけ繰り返す）
-      r.idle?.setEffectiveWeight((r.walk ? 1 - m.walk : 1) * (1 - mw) * (1 - jw))
+      const idleW = (r.walk ? 1 - m.walk : 1) * (1 - mw) * (1 - jw)
+      let steadyTo = r.idleMean
+      if (r.idleMix) {
+        // 待機を切り替える: シーンの時計で、今の 1〜2 本の強さと再生する所を決める
+        const entries = r.idleMix.at(t, this.idleEntries)
+        for (const c of r.idles) c.action.setEffectiveWeight(0)
+        for (const e of entries) {
+          const c = r.idles[e.index]
+          c.action.time = e.time % c.duration
+          c.action.setEffectiveWeight(idleW * e.weight)
+        }
+        steadyTo = this.mixedIdleMean(r, entries)
+      } else r.idle?.setEffectiveWeight(idleW)
       if (r.walk) {
         r.walk.setEffectiveWeight(m.walk * (1 - mw) * (1 - jw))
         // 町の中の移動の早送り（timeScale）では、その倍で。町の石段の上は踏面ごとに 1 歩（stride）になるよう、歩幅の比で速める
@@ -778,7 +840,7 @@ class VrmCharacterVisual implements CharacterVisual {
       // 寄りの画では待機の体の揺れ（腰・背骨・首・脚）を、クリップの平均の姿勢へ寄せて弱める（待機の強さの分だけ）
       const steady = this.steady(f, camera, delta) * (r.walk ? 1 - m.walk : 1) * (1 - mw) * (1 - jw)
       if (steady > 0.001) {
-        for (const b of r.idleMean) {
+        for (const b of steadyTo) {
           b.node.quaternion.slerp(b.q, steady)
           if (b.p) b.node.position.lerp(b.p, steady)
         }

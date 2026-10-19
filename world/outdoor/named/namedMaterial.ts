@@ -49,7 +49,7 @@ import { roomInterior, townLight } from '../town/facades'
 import { townShadow } from '../town/shadows'
 import { townTextureUniforms } from '../town/townTextures'
 import { townLampsEx } from '../town/lamps'
-import { markPaint, outdoorPaint, paintEmit, paintFlat } from '../paint'
+import { markPaint, outdoorPaint, paintEmit, paintFlat, paintLampLight } from '../paint'
 
 type Node<T = unknown> = THREE.Node<T>
 type F = Node<'float'>
@@ -615,8 +615,8 @@ export function createNamedMaterial() {
     const col = townLight(s.albedo.mul(s.metal.mul(-0.6).add(1.0)), s.Nd, s.ao, sh, 'named').toVar()
     if (paintFlat()) {
       // 平らな塗り: 照り返し・映り込みを省く
-      col.addAssign(s.albedo.mul(namedLamps(wp, s.Nd)))
-      col.addAssign(s.albedo.mul(townLampsEx(wp, s.Nd, float(1.0), float(0.08))).mul(s.ao))
+      col.addAssign(paintLampLight(s.albedo, namedLamps(wp, s.Nd)))
+      col.addAssign(paintLampLight(s.albedo, townLampsEx(wp, s.Nd, float(1.0), float(0.08))).mul(s.ao))
       return outdoorHaze(col, wp)
     }
     // 鏡面: 太陽のハイライトと空の映り込み
@@ -636,9 +636,9 @@ export function createNamedMaterial() {
     })
     col.addAssign(env.mul(fres).mul(mix(s.gloss.mul(0.4), 0.9, s.metal)).mul(mix(vec3(1.0), s.albedo.mul(2.5), s.metal)).mul(s.ao))
     // 夜の入口の灯り
-    col.addAssign(s.albedo.mul(namedLamps(wp, s.Nd)))
+    col.addAssign(paintLampLight(s.albedo, namedLamps(wp, s.Nd)))
     // 町の街灯・店先の灯り（灯りの表。名前のある建物の灯具は namedLamps で照らすので除く）
-    col.addAssign(s.albedo.mul(townLampsEx(wp, s.Nd, float(1.0), float(0.08))).mul(s.ao))
+    col.addAssign(paintLampLight(s.albedo, townLampsEx(wp, s.Nd, float(1.0), float(0.08))).mul(s.ao))
     return outdoorHaze(col, wp)
   })()
   return m
@@ -773,7 +773,8 @@ export function createNamedGlassMaterial() {
       .Else(() => {
         if (flatWindow) {
           // 平らな塗り: ガラスの色は外の塗りの window（部屋の奥・カーテン・棚は描かない）
-          room.assign(flatWindow(lit, lamp.mul(bright), N, V, clamp(p.div(sz), 0.0, 1.0)))
+          // 店・喫茶のガラス（kind 2・3）は店の正面のガラスとして（中の灯りと棚の影・扉は塗りの側で描く）
+          room.assign(flatWindow(lit, lamp.mul(bright), N, V, clamp(p.div(sz), 0.0, 1.0), select(kind.greaterThan(1.5).and(kind.lessThan(3.5)), 1.0, 0.0)))
           return
         }
         const office = select(kind.greaterThan(0.5).and(kind.lessThan(1.5)).or(kind.greaterThan(7.5)), 1.0, 0.0)

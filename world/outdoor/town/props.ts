@@ -41,7 +41,8 @@ import { depthMaterial, townShadow } from './shadows'
 import { townTextureUniforms } from './townTextures'
 import { townLamps, LAMP, type Lamp } from './lamps'
 import type { TownTile } from './townData'
-import { markPaint, paintEmit, paintFlat } from '../paint'
+import { markPaint, paintEmit, paintFlat, paintLampLight } from '../paint'
+import { glyph } from '../glyph'
 
 /**
  * 建物の小物（形で描く）。外壁のシェーダーの模様だけでは平らに見える所に、厚みのある物を足す。
@@ -526,18 +527,38 @@ export function createPropMaterials() {
       })
       .ElseIf(kind.lessThan(4.5), () => {
         // 袖看板（文字と、夜は光る）
-        const cellP = floor(vec2(m.z, m.y).div(vec2(0.18, 0.22)))
-        const letters = step(0.5, tslFract(sin(dot(cellP, vec2(12.9, 78.2))).mul(43758.5)))
-          .mul(step(0.1, m.z))
-          .mul(step(m.z, vSize.z.sub(0.1)))
-          .mul(step(0.12, m.y))
-          .mul(step(m.y, vSize.y.sub(0.12)))
-          .toVar()
-        const lc = select(dot(albedo, vec3(0.33)).greaterThan(0.4), vec3(0.08), vec3(0.85, 0.82, 0.72)).toVar()
-        If(abs(vLN.x).greaterThan(0.5), () => {
-          albedo.assign(mix(albedo, lc, letters.mul(fine)))
-        })
-        emit.assign(vColor.rgb.mul(1.8).add(lc.mul(letters).mul(1.2)).mul(uniforms.uShop))
+        if (flat) {
+          // 外の塗り（paint.ts）の flat: 縦 1 列の文字（画を組んだ形。glyph.ts）。夜は板が光り、文字は板の色と分けて光らせる
+          // （前は文字の上にも板の光を足していたので、明るい板では文字が光に埋もれて白い板に見えた）
+          const cw = max(vSize.z.sub(0.24), 0.1).toVar()
+          const ry = m.y.sub(0.16).div(cw.mul(1.08)).toVar()
+          const q = vec2(m.z.sub(0.12).div(cw), tslFract(ry))
+          const letters = glyph(q.x, q.y, tslFract(sin(floor(ry).mul(12.9).add(vColor.r.mul(37.0)).add(vColor.b.mul(11.0))).mul(43758.5)))
+            .mul(step(0.12, m.z))
+            .mul(step(m.z, vSize.z.sub(0.12)))
+            .mul(step(0.16, m.y))
+            .mul(step(floor(ry).add(1.0).mul(cw.mul(1.08)), vSize.y.sub(0.16)))
+            .toVar()
+          const light = dot(albedo, vec3(0.33)).greaterThan(0.4)
+          const lc = select(light, vec3(0.08), vec3(0.85, 0.82, 0.72)).toVar()
+          If(abs(vLN.x).greaterThan(0.5), () => {
+            albedo.assign(mix(albedo, lc, letters.mul(fine)))
+          })
+          emit.assign(mix(vColor.rgb.mul(1.8), lc.mul(select(light, 0.4, 1.6)), letters.mul(fine).mul(step(0.5, abs(vLN.x)))).mul(uniforms.uShop))
+        } else {
+          const cellP = floor(vec2(m.z, m.y).div(vec2(0.18, 0.22)))
+          const letters = step(0.5, tslFract(sin(dot(cellP, vec2(12.9, 78.2))).mul(43758.5)))
+            .mul(step(0.1, m.z))
+            .mul(step(m.z, vSize.z.sub(0.1)))
+            .mul(step(0.12, m.y))
+            .mul(step(m.y, vSize.y.sub(0.12)))
+            .toVar()
+          const lc = select(dot(albedo, vec3(0.33)).greaterThan(0.4), vec3(0.08), vec3(0.85, 0.82, 0.72)).toVar()
+          If(abs(vLN.x).greaterThan(0.5), () => {
+            albedo.assign(mix(albedo, lc, letters.mul(fine)))
+          })
+          emit.assign(vColor.rgb.mul(1.8).add(lc.mul(letters).mul(1.2)).mul(uniforms.uShop))
+        }
       })
       .ElseIf(kind.lessThan(5.5), () => {
         // 室外機（前の面にファンの丸）
@@ -564,7 +585,7 @@ export function createPropMaterials() {
       })
     const sh = townShadow(wp, N).toVar()
     const col = townLight(albedo, N, ao, sh, 'prop').toVar()
-    col.addAssign(albedo.mul(townLamps(wp, N)).mul(ao))
+    col.addAssign(paintLampLight(albedo, townLamps(wp, N)).mul(ao))
     // 金属の照り返し
     if (!flat) If(kind.greaterThan(0.5).and(kind.lessThan(2.5)).or(kind.greaterThan(4.5).and(kind.lessThan(7.5))), () => {
       col.addAssign(u.uSunLight.mul(pow(max(dot(reflect(V.negate(), N), u.uSunDir), 0.0), 30.0)).mul(0.15).mul(sh))

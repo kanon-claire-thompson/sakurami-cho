@@ -61,9 +61,10 @@ export interface OutdoorPaint {
   skyDome?: (d: V3, col: V3) => V3
   /**
    * 窓のガラス（flat のとき。名前のない建物・名前のある建物の窓）。lit = 点いている度合い（0〜1）、lamp = 点いた部屋の灯りの色（明るさ込み）、
-   * N = 窓の面の法線、V = 視線（面からカメラへ）、cell = 窓の中の位置（0〜1。左下が 0）。戻り値はトーンマッピングの前の色
+   * N = 窓の面の法線、V = 視線（面からカメラへ）、cell = 窓の中の位置（0〜1。左下が 0）、shop = 1 階の店の正面のガラス（ショーウィンドウと扉）か
+   * （1 = 店・0 = ほかの窓。渡さない呼び方もある）。戻り値はトーンマッピングの前の色
    */
-  window?: (lit: F, lamp: V3, N: V3, V: V3, cell: Node<'vec2'>) => V3
+  window?: (lit: F, lamp: V3, N: V3, V: V3, cell: Node<'vec2'>, shop?: F) => V3
   /**
    * 水面（flat のとき）。N = 波の法線、V = 視線、wp = 世界の位置、sea = 海か（川・運河・池は false）、lamps = 映った灯りの色。
    * 戻り値は空気遠近の前の色
@@ -74,6 +75,11 @@ export interface OutdoorPaint {
    * power = 灯りの強さ、d = 灯りまでの距離（m）、R = 届く距離（m）
    */
   lampFalloff?: (att: F, power: F, d: F, R: F) => F
+  /**
+   * 街灯・提灯・店先の灯りが照らした面の色（前の albedo × 照度の代わり）。albedo = 面の色（リニア）、E = 灯りの照度の和（色込み。lampFalloff を通した後）。
+   * 町の建物の壁・地面・名前のある建物・小物・地形が読む（乗り物・木などは前の albedo × 照度のまま）
+   */
+  lampLight?: (albedo: V3, E: V3) => V3
   /** 光の点（町の灯り・遠くの窓明かり）の形（前の芯とにじみの代わり）。r = 点の中心からの距離（0〜1）、core = 芯の半径（0〜1）。戻り値は明るさの倍率 */
   glow?: (r: F, core: F) => F
   /**
@@ -125,6 +131,9 @@ export const paintFlat = () => paint?.flat === true
 
 /** 光る物の色（外の塗りの emit を入れていれば、それを通す。入れていなければ col のまま） */
 export const paintEmit = (col: V3): V3 => (paint?.emit ? paint.emit(col) : col)
+
+/** 灯りが照らした面の色（外の塗りの lampLight を入れていれば、それを通す。入れていなければ albedo × 照度） */
+export const paintLampLight = (albedo: V3, E: V3): V3 => (paint?.lampLight ? paint.lampLight(albedo, E) : albedo.mul(E))
 
 /**
  * 材質に付ける塗りの印の名前（material.userData のキー）。外の塗りを入れているときだけ、塗りの口を通った材質に付ける（使う側の監査が読む。

@@ -311,6 +311,53 @@ export function lampNear(x: number, y: number, z: number, out: THREE.Vector3): n
   return best
 }
 
+/**
+ * シーンの点 (x, y, z) を照らす町の灯りの照度の和（表の升の灯りの全部。色 × 点き具合 × 強さ ÷ 距離の減衰 × 届く距離の縁の消え。面の向きは見ない）。
+ * 使う側が人物に町の灯りの色を乗せるのに使う（kanon-lab のアニメ塗りの花音）。out に照度の色（リニア）、dir に灯りの向きの照度の重みの和（点から灯りへ。
+ * 単位にする）を入れ、照度の明るさ（輝度）を返す。灯りが点いていない・表の外なら 0
+ */
+export function lampLightAt(x: number, y: number, z: number, out: THREE.Vector3, dir: THREE.Vector3): number {
+  out.set(0, 0, 0)
+  dir.set(0, 1, 0)
+  const d = cpuTable.data
+  if (!d || lampUniforms.uLampAny.value < 0.5) return 0
+  const cx = Math.floor((x - cpuTable.ox) / CELL)
+  const cz = Math.floor((z - cpuTable.oz) / CELL)
+  if (cx < 0 || cz < 0 || cx >= CELLS || cz >= CELLS) return 0
+  const row = (cz * CELLS * SLOTS + cx * SLOTS) * 4
+  let wx = 0
+  let wy = 0
+  let wz = 0
+  for (let k = 0; k < SLOTS; k++) {
+    const w = d[row + k * 4 + 3]
+    if (w <= 0) break
+    const kind = Math.floor(w)
+    const kk = lampKinds[kind]
+    if (!kk || Math.max(kk.x, kk.y, kk.z) < 1e-6) continue
+    const power = (w - kind) * 16
+    const dx = d[row + k * 4] - x
+    const dy = d[row + k * 4 + 1] - y
+    const dz = d[row + k * 4 + 2] - z
+    const d2 = dx * dx + dy * dy + dz * dz
+    const R = kk.w
+    if (d2 > R * R) continue
+    const dist = Math.sqrt(d2)
+    const edge = 1 - THREE.MathUtils.smoothstep(dist, R * 0.45, R)
+    const att = (power / (1 + d2 * 0.09)) * edge
+    out.x += kk.x * att
+    out.y += kk.y * att
+    out.z += kk.z * att
+    const lum = (kk.x * 0.2126 + kk.y * 0.7152 + kk.z * 0.0722) * att
+    const inv = 1 / Math.max(dist, 1e-3)
+    wx += dx * inv * lum
+    wy += dy * inv * lum
+    wz += dz * inv * lum
+  }
+  const len = Math.hypot(wx, wy, wz)
+  if (len > 1e-6) dir.set(wx / len, wy / len, wz / len)
+  return out.x * 0.2126 + out.y * 0.7152 + out.z * 0.0722
+}
+
 /** カメラからの距離でうすめる範囲（m）。配信（high）は窓から見える近くの斜面まで、撮影（film）は町の中の画のため遠くまで */
 export function setLampFade(from: number, to: number) {
   lampUniforms.uLampFade.value.set(from, to)

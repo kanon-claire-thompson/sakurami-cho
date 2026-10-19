@@ -48,7 +48,7 @@ import { townLight } from './town/facades'
 import { townShadow } from './town/shadows'
 import { townTextureUniforms } from './town/townTextures'
 import { townLamps } from './town/lamps'
-import { markPaint, outdoorPaint, paintEmit, paintFlat } from './paint'
+import { markPaint, outdoorPaint, paintEmit, paintFlat, paintLampLight } from './paint'
 
 type Node<T = unknown> = THREE.Node<T>
 
@@ -351,7 +351,7 @@ export function createStructureMaterial() {
       albedo.mulAssign(float(1.0).sub(streak.mul(0.18)).sub(smoothstep(0.0, 2.0, oNoise(p.mul(0.2)).mul(3.0)).oneMinus().mul(0.1)))
     }
     const col = townLight(albedo, N, float(1.0), townShadow(wp, N), 'structure').toVar()
-    col.addAssign(albedo.mul(townLamps(wp, N)))
+    col.addAssign(paintLampLight(albedo, townLamps(wp, N)))
     const k = select(
       emit.w.lessThan(0.5),
       0.0,

@@ -50,7 +50,8 @@ import {
 import { SITE } from '../../../core/town'
 import { sharedTime } from '../../materials/shared'
 import { oHash, oNoise, outdoorHaze, outdoorUniforms, skyColor, unlit, withUniforms } from '../materials'
-import { markPaint, outdoorPaint, paintEmit, paintFlat } from '../paint'
+import { markPaint, outdoorPaint, paintEmit, paintFlat, paintLampLight } from '../paint'
+import { glyph } from '../glyph'
 import { bayTarget, dirtOf, facadeType, hasFlag, near, occupancy, roomInterior, townLight, wallLayer, windowHash } from './facades'
 import { depthMaterial, townShadow } from './shadows'
 import { siteLight } from '../site/siteMaterial'
@@ -308,7 +309,7 @@ export function createGroundMaterial() {
         .mul(n1.mul(0.25).add(0.75))
         .mul(float(1.0).sub(lampNear.mul(0.75))),
     )
-    col.addAssign(albedo.mul(lampLit))
+    col.addAssign(paintLampLight(albedo, lampLit))
     // ラボのまわり: 形のある街灯・ガラス壁からこぼれる光・ネオン
     col.addAssign(albedo.mul(siteLight(wp, Nd)))
     return outdoorHaze(col, wp)
@@ -897,15 +898,37 @@ function wallSurface(s: Surf, V: V3, dist: F, part: F, ctx: BuildingCtx) {
       vec3(0.45, 0.08, 0.06),
       select(pal.lessThan(0.4), vec3(0.08, 0.2, 0.12), select(pal.lessThan(0.6), vec3(0.06, 0.1, 0.25), select(pal.lessThan(0.8), vec3(0.7, 0.66, 0.58), vec3(0.12, 0.11, 0.1)))),
     ).toVar()
-    // 文字のような明るい点
-    const letters = fine
-      .mul(step(0.55, oHash(floor(vec2(u.div(0.32), v.div(0.22))).add(seed.mul(9.0)))))
-      .mul(band(lev, 0.84, 0.93, fwy))
-      .mul(band(fract(cu), 0.18, 0.82, fwM.x.div(bayW)))
-      .toVar()
     const letterC = select(pal.greaterThan(0.6).and(pal.lessThan(0.8)), vec3(0.1), vec3(0.85, 0.82, 0.72)).toVar()
-    albedo.assign(mix(albedo, mix(signC, letterC, letters), signB))
-    s.emit.addAssign(signC.mul(1.6).add(letterC.mul(letters).mul(1.5)).mul(signB).mul(wl.uShop).mul(0.9))
+    if (flat) {
+      // 外の塗り（paint.ts）の flat: 文字は画を組んだ形（glyph.ts）で、言葉ごとに間を空けて看板の真ん中に並べる。夜は板と文字を分けて光らせる
+      // （前は升ごとの白い四角の点で、板の光も文字の上に足していたので、白い四角の並びに見えた）
+      const ch = float(0.09).mul(floorH).toVar()
+      const cx = u.div(ch.mul(0.95)).toVar()
+      const ci = floor(cx).toVar()
+      // 3 文字と 1 文字の間を 1 組に（組ごとに、たまに文字の無い組）
+      const word = step(0.22, oHash(vec2(floor(ci.div(4.0)).add(seed.mul(9.0)), bi.add(3.0))))
+      const space = step(2.5, ci.sub(floor(ci.div(4.0)).mul(4.0))).oneMinus()
+      // 文字の画は升の 1 割強の太さなので、消し始めを細かい模様（fine）より遠くに
+      const letters = smoothstep(0.03, 0.07, px)
+        .oneMinus()
+        .mul(glyph(fract(cx), lev.sub(0.84).div(0.09), oHash(vec2(ci, seed.mul(5.0).add(bi)))))
+        .mul(band(lev, 0.84, 0.93, fwy))
+        .mul(band(fract(cu), 0.16, 0.84, fwM.x.div(bayW)))
+        .mul(word)
+        .mul(space)
+        .toVar()
+      albedo.assign(mix(albedo, mix(signC, letterC, letters), signB))
+      s.emit.addAssign(mix(signC.mul(1.6), letterC.mul(select(pal.greaterThan(0.6).and(pal.lessThan(0.8)), 0.4, 1.7)), letters).mul(signB).mul(wl.uShop).mul(0.9))
+    } else {
+      // 文字のような明るい点
+      const letters = fine
+        .mul(step(0.55, oHash(floor(vec2(u.div(0.32), v.div(0.22))).add(seed.mul(9.0)))))
+        .mul(band(lev, 0.84, 0.93, fwy))
+        .mul(band(fract(cu), 0.18, 0.82, fwM.x.div(bayW)))
+        .toVar()
+      albedo.assign(mix(albedo, mix(signC, letterC, letters), signB))
+      s.emit.addAssign(signC.mul(1.6).add(letterC.mul(letters).mul(1.5)).mul(signB).mul(wl.uShop).mul(0.9))
+    }
     ao.mulAssign(float(1.0).sub(band(lev, 0.74, 0.8, fwy).mul(0.3)))
   })
 
@@ -950,7 +973,7 @@ function wallSurface(s: Surf, V: V3, dist: F, part: F, ctx: BuildingCtx) {
     If(open.greaterThan(0.001), () => {
       const closed = select(type.lessThan(1.5), step(fract(wh.mul(13.7)), u0.uNight.mul(0.3).mul(lit.oneMinus()).add(0.08)), 0.0).toVar()
       const cellUv = clamp(wp.div(max(wsz, vec2(0.01))), 0.0, 1.0)
-      const glassCol = (paintWindow ? paintWindow(lit, lamp.mul(bright), N, V, cellUv) : vec3(0.0)).toVar()
+      const glassCol = (paintWindow ? paintWindow(lit, lamp.mul(bright), N, V, cellUv, select(shopFront, 1.0, 0.0)) : vec3(0.0)).toVar()
       const fr = rect(wp, vec2(frameW), wsz.sub(frameW), fwM).oneMinus()
       const mid = select(office.greaterThan(0.5).and(type.greaterThan(6.5)), 0.0, band(wp.x, wsz.x.mul(0.5).sub(0.03), wsz.x.mul(0.5).add(0.03), fwM.x)).toVar()
       If(muntin.greaterThan(0.5), () => {
@@ -1237,7 +1260,7 @@ export function createTownBuildingMaterial(instanced: boolean) {
       })
     }
     // 夜: 街灯・店先の灯りが壁を照らす（灯りの表。近くだけ）
-    col.addAssign(s.albedo.mul(townLamps(wp, s.n)).mul(s.ao))
+    col.addAssign(paintLampLight(s.albedo, townLamps(wp, s.n)).mul(s.ao))
     col.assign(mix(col, s.glassCol, s.glass))
     col.assign(mix(col, townLight(s.overCol, N, s.ao, sh, 'prop'), s.over))
     col.assign(outdoorHaze(col, wp))

@@ -285,8 +285,8 @@ export class KitBuilder {
     g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3))
     g.setAttribute('aMat', new THREE.Float32BufferAttribute(this.mat, 2))
     g.setAttribute('aExt', new THREE.Float32BufferAttribute(this.ext, 4))
-    // 半精度（頂点 1 つ 8 バイト）。Float16BufferAttribute は半精度に直した値を受け取る
-    g.setAttribute('aThin', new THREE.Float16BufferAttribute(Uint16Array.from(this.thin, (v) => THREE.DataUtils.toHalfFloat(v)), 4))
+    // 単精度（半精度の Float16BufferAttribute は、WebGPU の描画で値が正しく読めず、近くの棒まで太った）
+    g.setAttribute('aThin', new THREE.Float32BufferAttribute(this.thin, 4))
     g.setIndex(this.vertexCount > 65535 ? new THREE.Uint32BufferAttribute(this.idx, 1) : new THREE.Uint16BufferAttribute(this.idx, 1))
     g.computeBoundingSphere()
     return g

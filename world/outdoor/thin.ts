@@ -1,4 +1,4 @@
-import { attribute, cameraProjectionMatrix, cameraViewMatrix, float, max, min, modelViewMatrix, positionGeometry, screenSize, select, vec3, vec4 } from 'three/tsl'
+import { attribute, cameraViewMatrix, float, max, min, modelViewMatrix, positionGeometry, select, uniform, vec3, vec4 } from 'three/tsl'
 import type { Node } from 'three/webgpu'
 
 /**
@@ -27,9 +27,15 @@ export function thinWidened(minPx = THIN_PX): Node<'vec3'> {
   return positionGeometry.add(t.xyz.mul(scale.sub(1.0)))
 }
 
+/**
+ * 奥行き 1m で 1m が何画素か（描いている画の高さ ÷ (2 tan(画角/2))。landscape.ts が毎コマ書く。窓明かりの点の uPx と同じ値）。
+ * （頂点の式の中では three の screenSize が描き先の大きさにならなかったので、自分で持つ）
+ */
+export const thinUniforms = { uPx: uniform(500) }
+
 /** 奥行き viewZ（m）での、描いている画の 1 画素の大きさ（m） */
 function pixelAt(viewZ: Node<'float'>) {
-  return max(viewZ, 0.01).mul(2.0).div(cameraProjectionMatrix.mul(vec4(0.0, 1.0, 0.0, 0.0)).y.mul(screenSize.y))
+  return max(viewZ, 0.01).div(thinUniforms.uPx)
 }
 
 /**

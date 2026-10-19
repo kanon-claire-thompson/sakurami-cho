@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { thinUniforms } from './thin'
 import { ENTRANCE, insideHall, ROOM } from '../../core/lab/plan'
 import { SITE, TOWN_QUALITY } from '../../core/town'
 import { insideLab, LOOKOUT, PARABOLA } from '../../core/site'
@@ -555,6 +556,7 @@ function updateLandscape(root: THREE.Group, townGroup: THREE.Group, f: TownFrame
   const h = gl.domElement.height
   const px = h / (2 * Math.tan(((cam.fov ?? 45) * Math.PI) / 360))
   lm.uniforms.uPx.value = px
+  thinUniforms.uPx.value = px
   // 交通（交通の時計で動く）と、夜の灯りの表の色と点き具合
   // 遠景を描かないコマ（北を向く配信の画など）は、時計だけ進めて車両を並べない（CPU を使わない）
   const shown = root.visible

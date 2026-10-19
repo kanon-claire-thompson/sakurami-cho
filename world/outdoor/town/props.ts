@@ -34,6 +34,7 @@ import {
   vec3,
   vec4,
 } from 'three/tsl'
+import type { Node } from 'three/webgpu'
 import { SITE } from '../../../core/town'
 import { outdoorHaze, outdoorUniforms, unlit, withUniforms } from '../materials'
 import { ROOF } from './buildingKit'
@@ -453,7 +454,7 @@ function instancedGeometry(base: THREE.BufferGeometry, wr: PropWriter) {
 
 /**
  * 小物の材質（TSL。WebGPU への移行の第 2 段）。インスタンスの値: pA = 位置（シーン）・向き、pB = 大きさ・傾き、pC = 色・種類。
- * 形はワールドの位置で計算する（前の GLSL は viewMatrix だけを掛けていた）。影の深さだけの材質は同じ positionNode を使う
+ * 形はワールドの位置で計算する（前の GLSL は viewMatrix だけを掛けていた）。影の深さだけの材質は同じ式の位置を使う（細い棒を太らせない形）
  */
 export function createPropMaterials() {
   const uniforms = { uShop: uniform(0), uLightGain: uniform(1) }
@@ -461,19 +462,24 @@ export function createPropMaterials() {
   const pA = attribute<'vec4'>('pA', 'vec4')
   const pB = attribute<'vec4'>('pB', 'vec4')
   const pC = attribute<'vec4'>('pC', 'vec4')
-  // 外の塗りの flat: 手すりの子柱・アンテナの細い棒は、画素より細くなる遠くで画素の幅まで太らせる（outdoor/thin.ts。塗りを入れなければ前と同じ）
-  const p0 = positionGeometry.mul(paintFlat() ? thinSize(pB.xyz, pA.xyz) : pB.xyz)
   const n0 = normalGeometry
   // 傾き（局所の x の軸まわり）と向き（縦の軸まわり。建物の局所 x = 平面の (cos, sin)、シーンでは (cos, 0, -sin)）
   const ct = cos(pB.w)
   const st = sin(pB.w)
-  const p1 = vec3(p0.x, ct.mul(p0.y).sub(st.mul(p0.z)), st.mul(p0.y).add(ct.mul(p0.z)))
-  const n1 = vec3(n0.x, ct.mul(n0.y).sub(st.mul(n0.z)), st.mul(n0.y).add(ct.mul(n0.z)))
   const c = cos(pA.w)
   const s = sin(pA.w)
-  // 局所の (x, 上, y) → シーン（x = 東、z = -北）
-  const wp0 = pA.xyz.add(vec3(c.mul(p1.x).sub(s.mul(p1.z)), p1.y, s.mul(p1.x).add(c.mul(p1.z)).negate()))
-  const positionNode = modelWorldMatrixInverse.mul(vec4(wp0, 1.0)).xyz
+  /** 大きさ size の箱の頂点（局所の (x, 上, y) → シーン（x = 東、z = -北）） */
+  const placed = (size: Node<'vec3'>) => {
+    const p0 = positionGeometry.mul(size)
+    const p1 = vec3(p0.x, ct.mul(p0.y).sub(st.mul(p0.z)), st.mul(p0.y).add(ct.mul(p0.z)))
+    const wp0 = pA.xyz.add(vec3(c.mul(p1.x).sub(s.mul(p1.z)), p1.y, s.mul(p1.x).add(c.mul(p1.z)).negate()))
+    return modelWorldMatrixInverse.mul(vec4(wp0, 1.0)).xyz
+  }
+  // 外の塗りの flat: 手すりの子柱・アンテナの細い棒は、画素より細くなる遠くで画素の幅まで太らせる（outdoor/thin.ts。塗りを入れなければ前と同じ）。
+  // 影の深さは太らせない形で（影の地図を描くときのカメラで太らせると、影が太くなる）
+  const positionNode = placed(paintFlat() ? thinSize(pB.xyz, pA.xyz) : pB.xyz)
+  const shadowPosition = placed(pB.xyz)
+  const n1 = vec3(n0.x, ct.mul(n0.y).sub(st.mul(n0.z)), st.mul(n0.y).add(ct.mul(n0.z)))
   const vNormal = varying(vec3(c.mul(n1.x).sub(s.mul(n1.z)), n1.y, s.mul(n1.x).add(c.mul(n1.z)).negate()))
   const vLocal = varying(positionGeometry)
   const vSize = varying(pB.xyz)
@@ -602,7 +608,7 @@ export function createPropMaterials() {
     col.addAssign(paintEmit(emit.mul(uniforms.uLightGain)).mul(exp(dist.negate().div(u.uHazeDist.mul(1.5)))))
     return col
   })()
-  const depth = depthMaterial({ positionNode })
+  const depth = depthMaterial({ positionNode: shadowPosition })
   return { material: withUniforms(material, uniforms), depth }
 }
 

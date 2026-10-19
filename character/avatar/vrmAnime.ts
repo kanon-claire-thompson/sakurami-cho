@@ -122,14 +122,22 @@ function partOf(name: string): Part {
   return 'other'
 }
 
-/** 既定の材質の合わせ方（推定） */
+/**
+ * 既定の材質の合わせ方（推定）。影の色を持ち上げ、肌のほかの部位も 6 割の強さで合わせる（どの VRM の影の色が暗くても、アニメ塗りの暗い夜のラボ・町で
+ * 影の側が黒く沈まないように。花音のように材質ごとに決めた表を入れるときは、この推定を使わない）
+ */
 function guessMaterial(name: string): VrmAnimeMaterialRule {
   const part = partOf(name)
   if (part === 'eye') return { keep: true }
-  if (part === 'skin') return { weight: VRM_ANIME.skin, noRim: true }
-  if (part === 'hair') return { noRim: true }
-  return {}
+  if (part === 'skin') return { weight: VRM_ANIME.skin, noRim: true, shadeLift: GUESS_SHADE_LIFT }
+  if (part === 'hair') return { weight: GUESS_WEIGHT, noRim: true, shadeLift: GUESS_SHADE_LIFT }
+  return { weight: GUESS_WEIGHT, shadeLift: GUESS_SHADE_LIFT }
 }
+
+/** 推定のときに影の色を寄せる先（色 × ratio）と寄せる量 */
+const GUESS_SHADE_LIFT = { ratio: 0.75, amount: 0.6 }
+/** 推定のときの、肌のほかの部位を合わせる強さ（影の色の色味・露出・くっきりさを元の値との間で混ぜる） */
+const GUESS_WEIGHT = 0.6
 
 /** 推定の部位の番号（肌 1・髪 2、ほかは材質ごとに 3〜14） */
 const otherIds = new Map<string, number>()

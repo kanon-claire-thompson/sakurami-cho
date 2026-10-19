@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu'
 import {
   Fn,
+  abs,
   If,
   attribute,
   cameraPosition,
@@ -18,6 +19,7 @@ import {
   positionGeometry,
   select,
   smoothstep,
+  step,
   uniform,
   varying,
   vec3,
@@ -132,7 +134,9 @@ function createWheelLineMaterial() {
   const alpha = clamp(px.div(1.2), 0.0, 1.0).mul(select(aLed.x.lessThan(0.5), uniforms.uSteel, 1.0)).toVar()
   const dir = normalize(wo.sub(wp))
   const side = normalize(cross(dir, normalize(cameraPosition.sub(wp))))
-  const moved = wp.add(side.mul(aSide).mul(w).mul(0.5))
+  // 外の塗り（paint.ts）の flat: 外周の LED の帯（kind 2）は、外の弦材の鋼管（半径 0.42m）の手前へ 0.6m 出す（鋼管に隠れて帯が縁しか見えなかった）
+  const lift = flat ? select(aLed.x.greaterThan(1.5), normalize(cameraPosition.sub(wp)).mul(0.6), vec3(0.0)) : vec3(0.0)
+  const moved = wp.add(side.mul(aSide).mul(w).mul(0.5)).add(lift)
   const clip = cameraProjectionMatrix.mul(cameraViewMatrix).mul(vec4(moved, 1.0))
   m.vertexNode = select(alpha.lessThan(0.001), vec4(0.0, 0.0, -2.0, 1.0), clip)
   const vAlpha = varying(alpha)
@@ -143,20 +147,42 @@ function createWheelLineMaterial() {
     const c = (paint?.light ? paint.light(vec3(0.78, 0.79, 0.8), vec3(0.0, 1.0, 0.0), float(1.0), float(1.0), 'structure') : vec3(0.78, 0.79, 0.8).mul(u.uSkyLight.mul(0.9).add(u.uSunLight.mul(0.45)))).toVar()
     const a = vAlpha
     const thin = min(3.0, float(1.0).div(max(a, 0.05)))
-    If(vLed.x.greaterThan(0.5).and(vLed.x.lessThan(1.5)), () => {
-      // スポーク: 根元から外へ光が流れる（流れる速さ = 風速）。いつもほのかに光り、流れる所が明るい
-      // 外の塗り（paint.ts）の flat: 流れる光は縁のくっきりした帯（光る物の色の式 emit に通す）
-      const pulse = (flat ? smoothstep(0.84, 0.86, fract(vLed.y.mul(2.5).sub(uniforms.uFlow))) : smoothstep(0.7, 1.0, fract(vLed.y.mul(2.5).sub(uniforms.uFlow)))).toVar()
-      // 画素より細い遠くの綱は、うすい分だけ明るく（線の数が多いので、白い円盤にならないよう上限は 3 倍）
-      // 軸のそばは綱が集まって白くつぶれるので、根元ほど暗く
-      const base = smoothstep(0.04, 0.5, vLed.y).mul(0.75).add(0.25)
-      c.addAssign(paintEmit(mix(vec3(1.0, 0.86, 0.66), vec3(1.0, 0.7, 0.4), pulse).mul(pulse.mul(2.6).add(0.45)).mul(base).mul(uniforms.uLed).mul(thin)))
-    }).ElseIf(vLed.x.greaterThan(1.5), () => {
-      // 外周: 下から潮位の高さまで光る
-      const h = vWorld.y.sub(uniforms.uRim.x).div(uniforms.uRim.y)
-      const lit = smoothstep(uniforms.uTide.sub(0.015), uniforms.uTide.add(0.015), h).oneMinus()
-      c.addAssign(paintEmit(vec3(1.0, 0.94, 0.84).mul(lit.mul(2.4).add(0.25)).mul(uniforms.uLed).mul(thin)))
-    })
+    if (flat) {
+      // 外の塗り（paint.ts）の flat: 形のくっきりした色の帯。いつも光る分（前は 0.45）が細い綱のうすさの倍率（thin。3 倍まで）で白くつぶれ、流れる光の帯が
+      // 見えなかった（スポークが一様な白い線）。綱は暗い鋼の色、いつもの光はごく弱く、流れる帯は琥珀（先頭は明るい白に近い色）。外周は潮位の高さまで琥珀の帯、
+      // その上は鋼の色（潮位の線は白く 1 段明るい）
+      const thinF = min(thin, 1.6)
+      If(vLed.x.greaterThan(0.5).and(vLed.x.lessThan(1.5)), () => {
+        const f = fract(vLed.y.mul(2.5).sub(uniforms.uFlow)).toVar()
+        const band = step(0.7, f).toVar()
+        const head = step(0.93, f)
+        const base = smoothstep(0.04, 0.5, vLed.y).mul(0.75).add(0.25)
+        const led = mix(vec3(0.06, 0.05, 0.04), mix(vec3(1.0, 0.42, 0.1).mul(1.3), vec3(1.0, 0.78, 0.45).mul(1.9), head), band)
+        c.assign(mix(c.mul(0.42), vec3(0.0), band.mul(uniforms.uLed)))
+        c.addAssign(paintEmit(led.mul(base).mul(uniforms.uLed).mul(thinF)))
+      }).ElseIf(vLed.x.greaterThan(1.5), () => {
+        const h = vWorld.y.sub(uniforms.uRim.x).div(uniforms.uRim.y)
+        const lit = step(h, uniforms.uTide).toVar()
+        const line = step(abs(h.sub(uniforms.uTide)), 0.012)
+        const led = mix(vec3(0.03), vec3(1.0, 0.6, 0.26).mul(1.3), lit).add(vec3(1.0, 0.95, 0.85).mul(line).mul(1.6))
+        c.assign(mix(c, vec3(0.0), max(lit, line).mul(uniforms.uLed)))
+        c.addAssign(paintEmit(led.mul(uniforms.uLed).mul(thinF)))
+      })
+    } else {
+      If(vLed.x.greaterThan(0.5).and(vLed.x.lessThan(1.5)), () => {
+        // スポーク: 根元から外へ光が流れる（流れる速さ = 風速）。いつもほのかに光り、流れる所が明るい
+        const pulse = smoothstep(0.7, 1.0, fract(vLed.y.mul(2.5).sub(uniforms.uFlow))).toVar()
+        // 画素より細い遠くの綱は、うすい分だけ明るく（線の数が多いので、白い円盤にならないよう上限は 3 倍）
+        // 軸のそばは綱が集まって白くつぶれるので、根元ほど暗く
+        const base = smoothstep(0.04, 0.5, vLed.y).mul(0.75).add(0.25)
+        c.addAssign(paintEmit(mix(vec3(1.0, 0.86, 0.66), vec3(1.0, 0.7, 0.4), pulse).mul(pulse.mul(2.6).add(0.45)).mul(base).mul(uniforms.uLed).mul(thin)))
+      }).ElseIf(vLed.x.greaterThan(1.5), () => {
+        // 外周: 下から潮位の高さまで光る
+        const h = vWorld.y.sub(uniforms.uRim.x).div(uniforms.uRim.y)
+        const lit = smoothstep(uniforms.uTide.sub(0.015), uniforms.uTide.add(0.015), h).oneMinus()
+        c.addAssign(paintEmit(vec3(1.0, 0.94, 0.84).mul(lit.mul(2.4).add(0.25)).mul(uniforms.uLed).mul(thin)))
+      })
+    }
     return outdoorHaze(c, vWorld)
   })()
   m.colorNode = col

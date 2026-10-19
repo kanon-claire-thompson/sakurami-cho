@@ -336,7 +336,8 @@ export function createTreeMaterials() {
 
   /** ガラスの温室（ガーデンドーム）の中の木だけが使う光（夜の中の灯りの照り返し・葉脈ライティングの光の点）。町の木は 0。画素の Fn の中で呼ぶ */
   const domeGlow = (albedo: V3, ao: F, wp: V3, seed: F, leaf: F) => {
-    const c = albedo.mul(uniforms.uExtraAmb).mul(ao.mul(0.4).add(0.6)).mul(1.6).toVar()
+    // 外の塗り（paint.ts）の flat は、まわりの明るさを強めに足す（質感・透ける光の分が無いので、夕方のドームの中の木がほぼ黒い塊だった）
+    const c = albedo.mul(uniforms.uExtraAmb).mul(ao.mul(0.4).add(0.6)).mul(paintFlat() ? 4.5 : 1.6).toVar()
     If(uniforms.uVein.greaterThan(0.0).and(leaf.greaterThan(0.5)), () => {
       const breath = sin(t.mul(0.55)).mul(0.38).add(0.62)
       // 光の点: 3 次元の升（0.45m）ごとに 1 つ、升の中の決まった所に小さな丸い光（前は升の面がそのまま光って、明るい四角の板に見えた）
@@ -346,7 +347,7 @@ export function createTreeMaterials() {
       const ctr = vec3(oHash(cell.xz.add(3.7).add(cell.y)), oHash(cell.zx.add(9.1).add(cell.y)), oHash(cell.xz.mul(1.3).add(5.3).add(cell.y))).mul(0.6).add(0.2)
       const r = length(g.sub(cell).sub(ctr))
       // 外の塗り（paint.ts）の flat: 光の点は縁のくっきりした丸（光る物の色の式 emit に通す）
-      const sp = step(0.8, hsh).mul(paintFlat() ? smoothstep(0.12, 0.125, r).oneMinus() : smoothstep(0.06, 0.2, r).oneMinus())
+      const sp = paintFlat() ? step(0.7, hsh).mul(smoothstep(0.155, 0.16, r).oneMinus()).mul(1.4) : step(0.8, hsh).mul(smoothstep(0.06, 0.2, r).oneMinus())
       const flow = sin(wp.y.mul(1.4).sub(t.mul(1.1)).add(seed.mul(12.0))).mul(0.45).add(0.55)
       c.addAssign(paintEmit(vec3(0.55, 1.0, 0.32).mul(sp.mul(1.2).mul(flow).add(0.008)).mul(uniforms.uVein).mul(breath)))
     })

@@ -64,6 +64,11 @@ export function createPoolMaterial() {
       const breath = sin(t.mul(0.55)).mul(0.38).add(0.62)
       const lamps = uniforms.uNightAmb.mul(0.6).add(paintEmit(vec3(0.55, 1.0, 0.32).mul(uniforms.uVein).mul(breath).mul(0.12)))
       const col = water(vec3(0.0, 1.0, 0.0), V, wp, false, lamps).toVar()
+      // 池の形: 浅い縁（輪の内と外）の明るい水の帯と、葉脈の光の緑の映り（平らな色。灯りの映りの段に届かない弱い光は、塗りの水の式では消えて池が見えなかった）
+      const shallow = vUv.y
+      const rim = step(0.8, shallow)
+      col.assign(mix(col, col.mul(1.5).add(u.uSkyLight.mul(0.12)).add(uniforms.uNightAmb.mul(0.8)), rim))
+      col.addAssign(paintEmit(vec3(0.45, 1.0, 0.35).mul(uniforms.uVein).mul(breath.mul(0.5).add(0.5)).mul(mix(0.1, 0.22, step(0.45, shallow)))))
       const df = length(p.sub(uniforms.uFoam.xy))
       const foamK = smoothstep(uniforms.uFoam.w.mul(0.3), uniforms.uFoam.w.mul(1.6), df).oneMinus()
       const foam = step(0.62, oNoise(p.mul(3.0).add(vec2(t.mul(0.9), t.mul(-0.7)))).mul(0.7).add(foamK.mul(0.4))).mul(foamK)

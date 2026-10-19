@@ -699,7 +699,11 @@ export function createPlantMaterials(nightAmb: THREE.Vector3) {
       // 外の塗り（paint.ts）の flat: 葉は付け根と先の 2 段の色・葉脈の形（明るい筋）だけ、幹と苔は平らな色。まだら・凹凸・透ける光・つやは描かない。
       // 光は木の光の式（'tree'。3 段）、葉脈ライティングは形のくっきりした筋を光る物の色の式（emit）に
       const veinQ = smoothstep(0.45, 0.55, vein).toVar()
+      // 光る葉脈は細い筋なので、光る所は広めに切る（前は 0.45〜0.55 で切った細い筋に弱い光で、夕方の葉脈ライティングがほとんど見えなかった）
+      const veinG = step(0.22, vein).toVar()
       If(leafy, () => {
+        // 葉の色を持ち上げる（暗くなるほど強く。前は夕方の中の植物がほぼ黒い塊だった）
+        albedo.mulAssign(mix(1.25, 1.8, u.uNight))
         albedo.mulAssign(mix(0.82, 1.05, smoothstep(0.45, 0.55, vUv.y)))
         albedo.assign(mix(albedo, albedo.mul(vec3(1.25, 1.3, 0.95)), veinQ.mul(0.5)))
         albedo.assign(mix(albedo, albedo.mul(vec3(1.3, 1.25, 1.0)), back.mul(0.6)))
@@ -711,11 +715,13 @@ export function createPlantMaterials(nightAmb: THREE.Vector3) {
       })
       const sh0 = townShadow(wp, N)
       const col = townLight(albedo, N, ao, select(leafy, leafShadow(sh0), sh0), 'tree').toVar()
-      col.addAssign(albedo.mul(uniforms.uNightAmb).mul(1.3))
+      // 空の光と中の灯りの照り返し（前の塗りの空の光・透ける光の分の代わり。平らに足す。前は省いていたので、夕方の中の植物がほぼ黒い塊だった）
+      col.addAssign(albedo.mul(u.uSkyLight.mul(0.8).add(uniforms.uNightAmb.mul(3.0))).mul(ao))
       const breath = sin(t.mul(0.55)).mul(0.38).add(0.62)
-      const flow = sin(vUv.y.mul(9.0).sub(t.mul(1.3)).add(vSeed.mul(20.0))).mul(0.4).add(0.6)
-      const glow = mix(vec3(0.55, 1.0, 0.32), vec3(0.95, 1.0, 0.5), veinQ)
-      col.addAssign(paintEmit(glow.mul(veinQ.mul(0.9).mul(flow).add(0.01)).mul(vCol.a).mul(uniforms.uVein).mul(breath).mul(select(leafy, float(1.0), float(0.0)))))
+      // 流れる光は 2 段（明るい所と、ほのかな所）
+      const flow = step(0.0, sin(vUv.y.mul(9.0).sub(t.mul(1.3)).add(vSeed.mul(20.0)))).mul(0.5).add(0.5)
+      const glow = mix(vec3(0.45, 1.0, 0.3), vec3(0.85, 1.0, 0.45), veinQ)
+      col.addAssign(paintEmit(glow.mul(veinG.mul(1.5).mul(flow).add(0.01)).mul(vCol.a).mul(uniforms.uVein).mul(breath.mul(0.5).add(0.5)).mul(select(leafy, float(1.0), float(0.0)))))
       return outdoorHaze(col, wp)
     }
     If(leafy, () => {

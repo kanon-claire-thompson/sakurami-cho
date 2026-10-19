@@ -416,6 +416,20 @@ function transitColor(builder: THREE.NodeBuilder) {
         emit.assign(vc.mul(aux).mul(tu.uLampOn).mul(tu.uLightGain))
         albedo.assign(vc.mul(0.4))
         gloss.assign(0.3)
+        if (flat) {
+          // 外の塗り（paint.ts）の flat: 停留所の屋根の下（とゴンドラの天井）の大きな灯りの板（白に近い色・aux 1.6）は、下から見ると面全体が光る平らな白い板に
+          // 見えたので、金属の天井板（継ぎ目の線と、灯りのまわりの明るい輪の 2 段）に、決まった間隔の丸い灯り（1.5m ごと）を並べる
+          If(aux.greaterThan(1.55).and(aux.lessThan(1.65)).and(vc.b.greaterThan(0.6)).and(N.y.lessThan(-0.7)), () => {
+            const q = fract(wuv.div(1.5)).sub(0.5).toVar()
+            const r = length(q)
+            const disc = step(r, 0.1)
+            const pool = step(r, 0.25)
+            const seam = step(0.47, max(abs(q.x), abs(q.y)))
+            const on = tu.uLampOn.mul(tu.uLightGain)
+            albedo.assign(mix(vec3(0.5, 0.52, 0.52), vec3(0.22, 0.23, 0.24), seam))
+            emit.assign(vc.mul(on).mul(disc.mul(2.4).add(pool.mul(disc.oneMinus()).mul(0.22)).add(seam.oneMinus().mul(0.05))))
+          })
+        }
       })
       .ElseIf(id.lessThan(10.5), () => {
         if (!flat) {

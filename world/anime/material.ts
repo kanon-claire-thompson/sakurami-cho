@@ -27,7 +27,7 @@ import {
 import { METAL_ROLES, roleColor, roleOf, type AnimeRole } from './palette'
 
 /**
- * アニメ塗りの素材（既定の塗り。scene/anime/LabAnime.tsx が、ラボの殻と什器・KB-001 の PBR の素材をこれに差し替える）。
+ * アニメ塗りの素材（地図の見た目。labAnime.ts が、ラボの殻と什器の素材（と使う側が渡した物）をこれに差し替える）。
  *
  * 光の計算は使わない（光を受けない MeshBasicNodeMaterial）。物ごとの下地（配色の表 palette.ts の役割の色）に時刻の配色（色味・明るさ）を掛け、
  * 1 つの決めた光の向き（キーライト。時刻で変わる）との N·L と、その光の影の地図（keyShadow.ts。物が落とす影）で、光の当たる側と影の 2 段に
@@ -42,7 +42,7 @@ import { METAL_ROLES, roleColor, roleOf, type AnimeRole } from './palette'
 /** ネオンの照り返しの光源の数（neon.ts が書く。足りない分は強さ 0） */
 export const NEON_COUNT = 8
 
-/** 素材の式が読む値（全部の差し替えた素材で共有。LabAnime.tsx が毎コマ書く。window.__ANIME__ から書き換えて確かめる） */
+/** 素材の式が読む値（全部の差し替えた素材で共有。labAnime.ts が毎コマ書く） */
 export function createAnimeUniforms() {
   return {
     /** 時刻の配色: 下地に掛ける色味×明るさ・影の色・光の当たる側の色（画面のリニアの値） */

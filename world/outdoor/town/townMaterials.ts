@@ -49,13 +49,12 @@ import {
 } from 'three/tsl'
 import { SITE } from '../../../core/town'
 import { sharedTime } from '../../materials/shared'
-import { oHash, oNoise, outdoorHaze, outdoorUniforms, skyColor, unlit, withUniforms } from '../materials'
-import { markPaint, outdoorPaint, paintEmit, paintFlat, paintLampLight } from '../paint'
+import { oHash, oNoise, outdoorHaze, outdoorUniforms, unlit, withUniforms } from '../materials'
+import { markPaint, outdoorPaint, paintEmit, paintLampLight } from '../paint'
 import { glyph } from '../glyph'
-import { bayTarget, dirtOf, facadeType, hasFlag, near, occupancy, roomInterior, townLight, wallLayer, windowHash } from './facades'
+import { bayTarget, dirtOf, facadeType, hasFlag, near, occupancy, townLight, wallLayer, windowHash } from './facades'
 import { depthMaterial, townShadow } from './shadows'
 import { siteLight } from '../site/siteMaterial'
-import { townTextureUniforms } from './townTextures'
 import { lampUniforms, townLamps, townLampsEx, townLampsMirror } from './lamps'
 import type { InstanceSet } from './buildingKit'
 
@@ -174,16 +173,12 @@ export function groundTexture(image: ImageBitmap, color: boolean, anisotropy: nu
  */
 export const groundHole = uniform(new THREE.Vector4(0, 0, 0, 0))
 
-/** 地面の質感の層（townTextures.ts の GROUND_LAYER） */
-const GLY = { grass: 0, dirt: 1, cobble: 3, slab: 4, asphalt: 5, meadow: 7 } as const
-
 /** 地形（頂点は標高を入れたシーンの座標、法線は高さ画像から）。色は地面の画像 */
 export function createGroundMaterial() {
   const uniforms = { uTownGlow: uniform(0), uGroundDetail: uniform(200), uHole: groundHole }
   const m = markPaint(unlit('townGround'), 'light')
   // 法線は頂点のまま（ローカル。地形の物は動かさない）を補間する
   const vNormal = varying(attribute<'vec3'>('normal', 'vec3'))
-  const tex = townTextureUniforms
   m.colorNode = Fn(() => {
     const wp = positionWorld.toVar()
     If(uniforms.uHole.w.greaterThan(0.5).and(length(wp.xz.sub(uniforms.uHole.xy)).lessThan(uniforms.uHole.z)), () => {
@@ -204,8 +199,7 @@ export function createGroundMaterial() {
     const dist = length(wp.sub(cameraPosition)).toVar()
     const veg = aux.g.toVar()
     const albedo = g.rgb.toVar()
-    // 外の塗り（paint.ts）の flat: むら・写真の質感・凹凸を省き、地面の画像の色と舗装の種類の色の塗り分けにする
-    const flat = paintFlat()
+    // むら・写真の質感・凹凸は描かず、地面の画像の色と舗装の種類の色の塗り分けにする
     // 作り直した広場: 地図の広場の石畳を、作った台の外では芝に
     const sg = siteGroundUniforms
     If(sg.uUnpave.z.greaterThan(0.0), () => {
@@ -219,89 +213,29 @@ export function createGroundMaterial() {
         aux.assign(vec4(aux.xy, aux.z.mul(un.oneMinus()), aux.w))
       })
     })
-    // 細かいむら（近くは芝・土・木の根元、遠くは森の濃淡）
-    const n1 = flat ? float(1.0) : oNoise(plan.mul(0.37)).toVar()
-    const n2 = flat ? float(0.5) : oNoise(plan.mul(0.083).add(11.0)).toVar()
-    if (!flat) {
-      const n3 = oNoise(plan.mul(0.011).sub(4.0)).toVar()
-      const nearF = smoothstep(120.0, 900.0, dist).oneMinus()
-      const detail = mix(n3.mul(0.2).add(0.9), n1.mul(0.22).add(0.78).add(n2.mul(0.22)), nearF)
-      albedo.mulAssign(mix(n3.mul(0.12).add(0.94), detail, veg.mul(0.65).add(0.35)))
-      // 森の樹冠のかたまり（植生の多い所ほど、濃い影のまだら）
-      const clump = smoothstep(0.42, 0.78, oNoise(plan.mul(0.055).add(3.7)).mul(0.7).add(n2.mul(0.3)))
-      albedo.mulAssign(float(1.0).sub(veg.mul(0.32).mul(clump)))
-    }
+    // むらは描かない（むらの値は一定）
+    const n1 = float(1.0)
+    const n2 = float(0.5)
     // 木の無い急な斜面は土と岩
     const steep = smoothstep(0.6, 0.86, N.y).oneMinus()
     albedo.assign(mix(albedo, vec3(0.12, 0.105, 0.085).mul(n2.mul(0.4).add(0.8)), steep.mul(float(0.65).sub(veg.mul(0.35)))))
     const Nd = N.toVar()
     const ao = float(1.0).toVar()
-    // 近く: 写真の質感（芝・土・砂利・石畳・敷石・アスファルト）を地面の色で染め、凹凸を足す
+    // 近く: 舗装の所を舗装の種類の色に（縁はくっきり。暗い灰色はアスファルト、明るい・暖かい色は石畳か敷石）
     const dk = smoothstep(uniforms.uGroundDetail.mul(0.6), uniforms.uGroundDetail, dist).oneMinus().toVar()
-    if (flat) {
-      // 平らな塗り: 舗装の所を舗装の種類の色に（縁はくっきり）。質感・凹凸・花は描かない
+    {
       const lumG = dot(g.rgb, LUMA).toVar()
       const warmth = g.r.sub(g.b).div(max(lumG, 0.01))
       const paved = smoothstep(0.47, 0.53, aux.b)
       const pavedC = select(lumG.lessThan(0.05), vec3(0.07, 0.07, 0.075), select(warmth.greaterThan(0.35), vec3(0.2, 0.18, 0.15), vec3(0.26, 0.25, 0.23)))
       albedo.assign(mix(albedo, mix(albedo, pavedC, 0.6), paved.mul(dk)))
     }
-    if (!flat) If(dk.greaterThan(0.001), () => {
-      const lumG = dot(g.rgb, LUMA).toVar()
-      const warmth = g.r.sub(g.b).div(max(lumG, 0.01))
-      const edge = oNoise(plan.mul(1.7)).sub(0.5).mul(0.3).add(oNoise(plan.mul(6.0)).sub(0.5).mul(0.12)).toVar()
-      const paved = smoothstep(0.42, 0.58, aux.b.add(edge)).toVar()
-      const grassy = smoothstep(0.35, 0.6, veg.add(edge)).mul(paved.oneMinus()).toVar()
-      const dirtW = paved.oneMinus().mul(grassy.oneMinus()).toVar()
-      // 舗装の種類: 暗い灰色はアスファルト、明るい・暖かい色は石畳か敷石
-      const pk = select(lumG.lessThan(0.05), float(GLY.asphalt), select(warmth.greaterThan(0.35), float(GLY.cobble), float(GLY.slab))).toVar()
-      const isAsphalt = pk.equal(GLY.asphalt)
-      const isCobble = pk.equal(GLY.cobble)
-      const pScale = select(isAsphalt, 4.0, select(isCobble, 1.8, 1.5)).toVar()
-      const p = plan
-      const dG = tex.uGndAlb.sample(p.div(2.6)).depth(int(GLY.grass)).rgb.mul(2.0).toVar()
-      const dG2 = tex.uGndAlb.sample(p.div(7.3).add(0.37)).depth(int(GLY.meadow)).rgb.mul(2.0)
-      const dD = tex.uGndAlb.sample(p.div(3.5)).depth(int(GLY.dirt)).rgb.mul(2.0)
-      const dP = mix(vec3(1.0), tex.uGndAlb.sample(p.div(pScale)).depth(int(pk)).rgb.mul(2.0), select(pk.equal(GLY.slab), 0.4, 0.8))
-      const nG = tex.uGndNrm.sample(p.div(2.6)).depth(int(GLY.grass)).xyz.mul(2.0).sub(1.0)
-      const nD = tex.uGndNrm.sample(p.div(3.5)).depth(int(GLY.dirt)).xyz.mul(2.0).sub(1.0)
-      const nP = tex.uGndNrm.sample(p.div(pScale)).depth(int(pk)).xyz.mul(2.0).sub(1.0)
-      // 芝は 2 つの大きさの質感をまぜて、繰り返しの模様を消す
-      const grassDet = mix(dG, dG.mul(dG2), oNoise(plan.mul(0.13)).sub(0.5).mul(0.3).add(0.45))
-      const det = grassDet.mul(grassy).add(dD.mul(dirtW)).add(dP.mul(paved)).toVar()
-      // 舗装の所は、ぼやけた地面の画像の色ではなく、舗装の種類の色（縁がくっきりする）
-      const pavedC = select(isAsphalt, vec3(0.07, 0.07, 0.075), select(isCobble, vec3(0.2, 0.18, 0.15), vec3(0.26, 0.25, 0.23)))
-      albedo.assign(mix(albedo, mix(albedo, pavedC, 0.6), paved.mul(dk)))
-      det.assign(pow(max(det, 0.0), vec3(2.2)))
-      // 芝の色は質感の色合いを少し残す（緑の濃淡）、ほかはデータの色で染める
-      const dl = dot(det, LUMA).toVar()
-      const tinted = albedo.mul(mix(vec3(dl), det, grassy.mul(0.25))).toVar()
-      // 芝の色を少し落ち着かせ、枯れた所・土の見える所のまだらを足す（10 月の芝）
-      const dry = smoothstep(0.45, 0.85, oNoise(plan.mul(0.21).add(5.0)).mul(0.7).add(oNoise(plan.mul(1.1)).mul(0.3))).mul(grassy)
-      tinted.assign(mix(tinted, vec3(dot(tinted, LUMA)).mul(vec3(1.25, 1.05, 0.62)), dry.mul(0.55).add(grassy.mul(0.22))))
-      tinted.mulAssign(float(1.0).sub(grassy.mul(0.18)))
-      // 芝の中の小さな花（白・黄）
-      const fc = floor(plan.mul(7.0)).toVar()
-      const fo = vec2(oHash(fc.add(1.3)), oHash(fc.add(7.1))).mul(0.6).add(0.2)
-      const fl = step(0.93, oHash(fc))
-        .mul(grassy)
-        .mul(smoothstep(6.0, 22.0, dist).oneMinus())
-        .mul(smoothstep(0.03, 0.06, length(fract(plan.mul(7.0)).sub(fo))).oneMinus())
-      tinted.assign(mix(tinted, mix(vec3(0.8, 0.78, 0.68), vec3(0.8, 0.62, 0.1), oHash(fc.add(3.0))), fl.mul(0.85)))
-      albedo.assign(mix(albedo, tinted, dk))
-      const tn = nG.mul(grassy).add(nD.mul(dirtW)).add(nP.mul(paved)).toVar()
-      // 地面の接空間: x = 東、y = 北（シーンの -z）
-      const Tg = normalize(vec3(1.0, 0.0, 0.0).sub(N.mul(N.x))).toVar()
-      const Bg = cross(N, Tg)
-      Nd.assign(normalize(mix(N, normalize(Tg.mul(tn.x).add(Bg.mul(tn.y)).add(N.mul(max(tn.z, 0.3)))), dk.mul(0.9))))
-      ao.assign(mix(1.0, dl.mul(0.15).add(0.85), dk))
-    })
     const col = townLight(albedo, Nd, ao, townShadow(wp, N), 'ground').toVar()
     // 夜: 街灯が道と広場の地面を暖色に照らす。近くは灯りの表（灯りの位置と向き）で照らし、地面の画像の照り返しはうすめる
     const lampLit = townLampsEx(wp, Nd, float(0.0), float(0.0))
     const lampNear = lampUniforms.uLampInfo.w.mul(smoothstep(lampUniforms.uLampFade.x.mul(0.5), lampUniforms.uLampFade.x, dist).oneMinus())
-    // 地面の画像の照り返し（平らな塗りでは 2 段の光だまり）
-    const glowR = flat ? smoothstep(0.42, 0.46, aux.r).mul(0.18).add(smoothstep(0.68, 0.72, aux.r).mul(0.3)) : aux.r.mul(aux.r)
+    // 地面の画像の照り返し（2 段の光だまり）
+    const glowR = smoothstep(0.42, 0.46, aux.r).mul(0.18).add(smoothstep(0.68, 0.72, aux.r).mul(0.3))
     col.addAssign(
       vec3(1.0, 0.6, 0.3)
         .mul(glowR)
@@ -351,38 +285,12 @@ export function createWaterMaterial(sea: boolean) {
     const N = normalize(vec3(w1.sub(0.5).mul(0.18).mul(fade).add(w2.sub(0.5).mul(0.1).mul(fade)), 1.0, w2.sub(0.5).mul(0.18).mul(fade))).toVar()
     const R = reflect(V.negate(), N).toVar()
     R.assign(vec3(R.x, abs(R.y), R.z))
-    // 外の塗り（paint.ts）の water（flat のとき）: 水の色・映り・ハイライトは塗りの式。灯りの映りは渡す
-    const paintWater = paintFlat() ? outdoorPaint()?.water : undefined
-    if (paintWater) {
-      const lampNear = lampUniforms.uLampInfo.w.mul(smoothstep(lampUniforms.uLampFade.x.mul(0.5), lampUniforms.uLampFade.x, dist).oneMinus())
-      const lamps = townLampsMirror(wp, R)
-        .mul(w1.mul(0.5).add(0.75))
-        .add(vec3(1.0, 0.62, 0.32).mul(aux.r.mul(aux.r)).mul(uniforms.uTownGlow).mul(0.9).mul(float(1.0).sub(lampNear.mul(0.85))))
-      return outdoorHaze(paintWater(N, V, wp, sea, lamps), wp)
-    }
-    const fres = pow(clamp(dot(N, V).oneMinus(), 0.0, 1.0), 5.0).mul(0.98).add(0.02)
-    const refl = skyColor(R)
-    const body = sea ? u.uWater.mul(u.uSkyLight.mul(0.9).add(u.uSunLight.mul(0.18))) : u.uWater.mul(vec3(0.8, 1.15, 0.9)).mul(u.uSkyLight.mul(0.9).add(u.uSunLight.mul(0.15)))
-    // 夜の映り込み: 海は夜空（地平線の町明かりは控えめ）、川・運河は両岸の暗い建物と木に囲まれているので、空はほとんど映らない
-    // （前は空の地平線の色と地面の画像の照り返しをそのまま映して、明るい灰色の板に見えた。段階 5 の色の仕上げ）
-    const nightRefl = float(1.0).sub(u.uNight.mul(sea ? 0.45 : 0.68))
-    const col = mix(body, refl.mul(nightRefl), clamp(fres.mul(0.92).add(0.06), 0.0, 1.0)).toVar()
-    // 太陽のきらめき（太陽の側。夕方は道のように伸びる）
-    const spec = pow(max(dot(R, u.uSunDir), 0.0), 220.0).toVar()
-    const sparkle = smoothstep(0.55, 0.95, oNoise(wp.xz.mul(0.6).add(t.mul(0.6))))
-    col.addAssign(u.uSunLight.mul(spec.mul(3.5).add(spec.mul(sparkle).mul(6.0))).mul(smoothstep(-0.02, 0.04, u.uSunDir.y)))
-    // 夜: 岸の灯りが水面に映る。近くは灯りの表の灯りそのもの（さざ波で揺れて縦に伸びる光の筋）、遠くは地面の画像の照り返しをうすく
+    // 水の色・映り・ハイライトは外の塗りの式（paint.ts の water）。灯りの映りは渡す
     const lampNear = lampUniforms.uLampInfo.w.mul(smoothstep(lampUniforms.uLampFade.x.mul(0.5), lampUniforms.uLampFade.x, dist).oneMinus())
-    col.addAssign(townLampsMirror(wp, R).mul(w1.mul(0.5).add(0.75)))
-    col.addAssign(
-      vec3(1.0, 0.62, 0.32)
-        .mul(aux.r.mul(aux.r))
-        .mul(uniforms.uTownGlow)
-        .mul(0.9)
-        .mul(w2.mul(w1).mul(1.2).add(0.4))
-        .mul(float(1.0).sub(lampNear.mul(0.85))),
-    )
-    return outdoorHaze(col, wp)
+    const lamps = townLampsMirror(wp, R)
+      .mul(w1.mul(0.5).add(0.75))
+      .add(vec3(1.0, 0.62, 0.32).mul(aux.r.mul(aux.r)).mul(uniforms.uTownGlow).mul(0.9).mul(float(1.0).sub(lampNear.mul(0.85))))
+    return outdoorHaze(outdoorPaint().water(N, V, wp, sea, lamps), wp)
   })()
   return withUniforms(m, uniforms)
 }
@@ -533,30 +441,8 @@ const rect = (p: V2, o0: V2, o1: V2, fw: V2) => {
   const a = smoothstep(o0.sub(fw), o0.add(fw), p).sub(smoothstep(o1.sub(fw), o1.add(fw), p))
   return a.x.mul(a.y)
 }
-/** 質感の層の一辺（m） */
-const layerScale = (layer: F) =>
-  select(
-    layer.lessThan(0.5),
-    2.4,
-    select(layer.lessThan(1.5), 3.0, select(layer.lessThan(2.5), 2.6, select(layer.lessThan(3.5), 2.0, select(layer.lessThan(4.5), 3.2, select(layer.lessThan(5.5), 2.4, select(layer.lessThan(6.5), 1.4, select(layer.lessThan(7.5), 2.2, 2.0))))))),
-  )
-/** 質感（色の倍率・接空間の法線）。uv は m を一辺で割った値 */
-function sampleLayer(uvp: V2, layer: F, contrast: F | number) {
-  const t = townTextureUniforms.uBldAlb.sample(uvp).depth(int(layer)).rgb
-  const det = pow(max(mix(vec3(1.0), t.mul(2.0), contrast), 0.0), vec3(2.2)).toVar()
-  const tn = townTextureUniforms.uBldNrm.sample(uvp).depth(int(layer)).xyz.mul(2.0).sub(1.0).toVar()
-  return { det, tn }
-}
 /** データの色 × 質感（hue = 質感の色合いを残す割合） */
 const tintDetail = (base: V3, det: V3, hue: F | number) => base.mul(mix(vec3(dot(det, LUMA)), det, hue))
-
-/** ガラスに映る景色: 上は空（地平線の近くは向かいの建物で暗い）、下は通りと町（暗い） */
-const envReflection = Fn(([R]: [V3]) => {
-  const u = outdoorUniforms
-  const town = u.uSkyLight.mul(0.16).add(u.uSunLight.mul(0.035)).toVar()
-  const c = select(R.y.greaterThan(0.0), mix(skyColor(R), town.mul(1.4), smoothstep(0.02, 0.35, R.y).oneMinus().mul(0.75)), town)
-  return c.mul(float(1.0).sub(u.uNight.mul(0.6)))
-})
 
 interface Surf {
   albedo: V3
@@ -595,7 +481,6 @@ function wallSurface(s: Surf, V: V3, dist: F, part: F, ctx: BuildingCtx) {
   const v = vFac.y.toVar()
   const type = vKind.x.toVar()
   const layer = vKind.y.toVar()
-  const dirt = vKind.z.toVar()
   const use = vMeta.x.toVar()
   const flags = vMeta.y.toVar()
   const seed = vMeta.z.toVar()
@@ -604,14 +489,9 @@ function wallSurface(s: Surf, V: V3, dist: F, part: F, ctx: BuildingCtx) {
   const fwM = max(fwidth(vec2(u, v)), vec2(1e-4)).toVar()
   const px = max(fwM.x, fwM.y).toVar()
 
-  // 外壁の質感
-  const sc = layerScale(layer).toVar()
-  const contrast = select(near(layer, 1.0).or(near(layer, 4.0)), 0.8, select(near(layer, 2.0), 0.6, 1.0))
-  // 外の塗り（paint.ts）の flat: 写真の質感・汚れ・窓の奥の部屋とカーテン・映り込みを省く（窓の格子・枠・帯・看板は残す）
-  const flat = paintFlat()
-  const { det, tn } = flat
-    ? { det: vec3(1.0).toVar(), tn: vec3(0.0, 0.0, 1.0).toVar() }
-    : sampleLayer(vec2(u, v.negate()).div(sc).add(seed.mul(vec2(17.0, 5.0))), layer, contrast)
+  // 外壁の色（質感の写真・汚れ・窓の奥の部屋とカーテン・映り込みは描かない。窓の格子・枠・帯・看板は形のまま）
+  const det = vec3(1.0).toVar()
+  const tn = vec3(0.0, 0.0, 1.0).toVar()
   const hue = select(near(layer, 3.0), 0.3, select(near(layer, 2.0).or(near(layer, 0.0)), 0.25, 0.0))
   const base = s.albedo.toVar()
   const albedo = tintDetail(base, det, hue).toVar()
@@ -899,8 +779,8 @@ function wallSurface(s: Surf, V: V3, dist: F, part: F, ctx: BuildingCtx) {
       select(pal.lessThan(0.4), vec3(0.08, 0.2, 0.12), select(pal.lessThan(0.6), vec3(0.06, 0.1, 0.25), select(pal.lessThan(0.8), vec3(0.7, 0.66, 0.58), vec3(0.12, 0.11, 0.1)))),
     ).toVar()
     const letterC = select(pal.greaterThan(0.6).and(pal.lessThan(0.8)), vec3(0.1), vec3(0.85, 0.82, 0.72)).toVar()
-    if (flat) {
-      // 外の塗り（paint.ts）の flat: 文字は画を組んだ形（glyph.ts）で、言葉ごとに間を空けて看板の真ん中に並べる。夜は板と文字を分けて光らせる
+    {
+      // 文字は画を組んだ形（glyph.ts）で、言葉ごとに間を空けて看板の真ん中に並べる。夜は板と文字を分けて光らせる
       // （前は升ごとの白い四角の点で、板の光も文字の上に足していたので、白い四角の並びに見えた）
       const ch = float(0.09).mul(floorH).toVar()
       const cx = u.div(ch.mul(0.95)).toVar()
@@ -919,43 +799,9 @@ function wallSurface(s: Surf, V: V3, dist: F, part: F, ctx: BuildingCtx) {
         .toVar()
       albedo.assign(mix(albedo, mix(signC, letterC, letters), signB))
       s.emit.addAssign(mix(signC.mul(1.6), letterC.mul(select(pal.greaterThan(0.6).and(pal.lessThan(0.8)), 0.4, 1.7)), letters).mul(signB).mul(wl.uShop).mul(0.9))
-    } else {
-      // 文字のような明るい点
-      const letters = fine
-        .mul(step(0.55, oHash(floor(vec2(u.div(0.32), v.div(0.22))).add(seed.mul(9.0)))))
-        .mul(band(lev, 0.84, 0.93, fwy))
-        .mul(band(fract(cu), 0.18, 0.82, fwM.x.div(bayW)))
-        .toVar()
-      albedo.assign(mix(albedo, mix(signC, letterC, letters), signB))
-      s.emit.addAssign(signC.mul(1.6).add(letterC.mul(letters).mul(1.5)).mul(signB).mul(wl.uShop).mul(0.9))
     }
     ao.mulAssign(float(1.0).sub(band(lev, 0.74, 0.8, fwy).mul(0.3)))
   })
-
-  if (!flat) {
-    // --- 汚れ・色あせ・雨だれ（建物ごとにばらつく）---
-    const uv2 = vec2(u, v)
-    const blot = oNoise(uv2.mul(0.35).add(seed.mul(31.0))).mul(0.6).add(oNoise(uv2.mul(1.3).add(seed.mul(7.0))).mul(0.4))
-    albedo.mulAssign(float(1.0).sub(dirt.mul(0.22).mul(smoothstep(0.35, 0.8, blot))))
-    const lumA = dot(albedo, LUMA)
-    albedo.assign(mix(albedo, vec3(lumA), dirt.mul(0.25)))
-    // 足元のはね返りの汚れ
-    albedo.mulAssign(float(1.0).sub(dirt.mul(0.3).mul(smoothstep(0.0, 0.9, v).oneMinus()).mul(oNoise(vec2(u.mul(3.0), v)).mul(0.4).add(0.6))))
-    // 窓の下の雨だれ（窓台の両端から下へ）
-    If(inside.greaterThan(0.5).and(px.lessThan(0.4)), () => {
-      const below = o0.y.sub(cell.y).toVar()
-      const xin = band(cell.x, o0.x.sub(0.05), o1.x.add(0.05), fwM.x)
-      const streak = xin
-        .mul(step(0.0, below))
-        .mul(exp(below.mul(-1.3)))
-        .mul(smoothstep(0.45, 0.8, oNoise(vec2(u.mul(9.0).add(seed.mul(40.0)), 0.5))))
-      albedo.mulAssign(float(1.0).sub(dirt.mul(0.38).mul(streak)))
-    })
-    // 上端（軒・パラペットの下）から下りる筋
-    const fromTop = vB.x.sub(v)
-    const topStreak = smoothstep(0.4, 0.75, oNoise(vec2(u.mul(2.3).add(seed.mul(13.0)), 0.5))).mul(exp(max(fromTop, 0.0).mul(-0.35)))
-    albedo.mulAssign(float(1.0).sub(dirt.mul(0.32).mul(topStreak)))
-  }
 
   // 環境光の遮り: 通りの底ほど暗い（向かいの建物で空が狭い）・軒の下
   ao.mulAssign(mix(0.58, 1.0, smoothstep(-0.5, 6.0, v)))
@@ -967,13 +813,13 @@ function wallSurface(s: Surf, V: V3, dist: F, part: F, ctx: BuildingCtx) {
   s.ao.assign(ao)
   s.n.assign(normalize(T.mul(tnw.x).add(U.mul(tnw.y)).add(N.mul(tnw.z))))
 
-  if (flat) {
-    // --- 窓（平らな塗り）: ガラスの色は外の塗りの window。窓枠・召し合わせ・格子・店のガラスの割りと、閉めた雨戸は形のまま ---
-    const paintWindow = outdoorPaint()?.window
+  {
+    // --- 窓: ガラスの色は外の塗りの window。窓枠・召し合わせ・格子・店のガラスの割りと、閉めた雨戸は形のまま ---
+    const paintWindow = outdoorPaint().window
     If(open.greaterThan(0.001), () => {
       const closed = select(type.lessThan(1.5), step(fract(wh.mul(13.7)), u0.uNight.mul(0.3).mul(lit.oneMinus()).add(0.08)), 0.0).toVar()
       const cellUv = clamp(wp.div(max(wsz, vec2(0.01))), 0.0, 1.0)
-      const glassCol = (paintWindow ? paintWindow(lit, lamp.mul(bright), N, V, cellUv, select(shopFront, 1.0, 0.0)) : vec3(0.0)).toVar()
+      const glassCol = paintWindow(lit, lamp.mul(bright), N, V, cellUv, select(shopFront, 1.0, 0.0)).toVar()
       const fr = rect(wp, vec2(frameW), wsz.sub(frameW), fwM).oneMinus()
       const mid = select(office.greaterThan(0.5).and(type.greaterThan(6.5)), 0.0, band(wp.x, wsz.x.mul(0.5).sub(0.03), wsz.x.mul(0.5).add(0.03), fwM.x)).toVar()
       If(muntin.greaterThan(0.5), () => {
@@ -991,122 +837,17 @@ function wallSurface(s: Surf, V: V3, dist: F, part: F, ctx: BuildingCtx) {
       s.glass.assign(max(s.glass, mix(open, area, tiny)))
       s.glassCol.assign(glassCol)
     })
-    return
   }
-
-  // --- 窓 ---
-  If(open.greaterThan(0.001), () => {
-    const R = reflect(V.negate(), N).toVar()
-    const fres = pow(clamp(dot(N, V).oneMinus(), 0.0, 1.0), 5.0).mul(0.96).add(0.04).toVar()
-    const refl = envReflection(R).toVar()
-    const glassCol = vec3(0.0).toVar()
-    const rd = vec3(dot(V.negate(), T), dot(V.negate(), U), dot(V, N)).toVar()
-    // 浅い角度から見る窓は、部屋の奥の形が細かく詰まってちらつくので、平均の色へ（そこは映り込みが強いので目立たない）
-    const graze = smoothstep(0.1, 0.32, rd.z).toVar()
-    const useInterior = ctx.uInterior.mul(tiny.oneMinus()).mul(step(0.1, rd.z)).toVar()
-    const rs = fract(wh.mul(7.13).add(seed)).toVar()
-    // 閉めた雨戸・シャッター（家。夜ほど多い）
-    const closed = select(type.lessThan(1.5), step(fract(wh.mul(13.7)), u0.uNight.mul(0.3).mul(lit.oneMinus()).add(0.08)), 0.0).toVar()
-    const avgRoom = vec3(0.02, 0.019, 0.017)
-      .mul(dot(u0.uSkyLight, LUMA).mul(2.0).add(1.0))
-      .add(lamp.mul(lit).mul(bright).mul(0.45))
-      .toVar()
-    If(useInterior.greaterThan(0.001).and(closed.lessThan(0.5)), () => {
-      const yF = o0.y.negate()
-      const yC = floorH.sub(o0.y).sub(0.05)
-      const ri = roomInterior(wp, wsz, rd, reveal, yF, yC, roomD, rs, lit, lamp.mul(bright), office)
-      const room = ri.color
-      If(ri.hitR.greaterThan(0.5), () => {
-        // 見込み（窓の額縁の奥行き）の面: 外壁の色（開口の縁のなめらかな所は、開口の割合でまぜる）
-        s.n.assign(normalize(mix(s.n, normalize(T.mul(ri.revealN.x).add(U.mul(ri.revealN.y))), open)))
-        s.ao.mulAssign(mix(1.0, 0.8, open))
-        open.assign(0.0)
-      }).Else(() => {
-        const rdz = max(rd.z, 0.03)
-        const pg = wp.add(rd.xy.mul(reveal.div(rdz))).toVar()
-        // カーテン・レース・ブラインド（ガラスのすぐ奥の面）
-        const pc = wp.add(rd.xy.mul(reveal.add(0.07).div(rdz))).toVar()
-        const cv2 = fract(wh.mul(31.7)).toVar()
-        const curtainC = mix(vec3(0.72, 0.68, 0.58), mix(vec3(0.45, 0.52, 0.6), vec3(0.6, 0.45, 0.36), fract(rs.mul(3.0))), step(0.6, fract(rs.mul(9.1)))).toVar()
-        const dayIn = u0.uSkyLight.mul(0.5).add(u0.uSunLight.mul(0.08))
-        const cloth = vec3(0.0).toVar()
-        const clothA = float(0.0).toVar()
-        If(office.lessThan(0.5), () => {
-          const cl = fract(rs.mul(4.1)).mul(0.3).add(0.12)
-          const cr = fract(rs.mul(6.7)).mul(0.3).add(0.12)
-          const folds = float(1.0).sub(fine.mul(0.18).mul(sin(pc.x.mul(28.0).add(rs.mul(10.0))).mul(0.5).add(0.5)))
-          If(cv2.lessThan(0.6), () => {
-            const sideC = float(1.0).sub(step(cl.mul(wsz.x), pc.x).mul(step(pc.x, wsz.x.mul(cr.oneMinus())))).toVar()
-            cloth.assign(curtainC.mul(folds))
-            clothA.assign(sideC)
-            If(cv2.lessThan(0.35).and(sideC.lessThan(0.5)), () => {
-              cloth.assign(vec3(0.8, 0.79, 0.76))
-              clothA.assign(0.62)
-            })
-          })
-            .ElseIf(cv2.lessThan(0.72), () => {
-              const level = wsz.y.mul(fract(rs.mul(2.3)).mul(0.8).add(0.2))
-              const slat = float(1.0).sub(fine.mul(0.2).mul(smoothstep(0.2, 0.5, abs(fract(pc.y.div(0.035)).sub(0.5)))))
-              clothA.assign(step(wsz.y.sub(level), pc.y))
-              cloth.assign(vec3(0.72, 0.71, 0.68).mul(slat))
-            })
-            .ElseIf(cv2.lessThan(0.82), () => {
-              cloth.assign(curtainC.mul(float(1.0).sub(fine.mul(0.18).mul(sin(pc.x.mul(22.0).add(rs.mul(10.0))).mul(0.5).add(0.5)))))
-              clothA.assign(1.0)
-            })
-        }).ElseIf(shopFront.not().and(cv2.lessThan(0.5)), () => {
-          const level = wsz.y.mul(fract(rs.mul(2.3)).mul(0.7).add(0.3))
-          const slat = float(1.0).sub(fine.mul(0.2).mul(smoothstep(0.2, 0.5, abs(fract(pc.y.div(0.04)).sub(0.5)))))
-          clothA.assign(step(wsz.y.sub(level), pc.y))
-          cloth.assign(vec3(0.7, 0.71, 0.7).mul(slat))
-        })
-        const clothLit = cloth.mul(dayIn.mul(0.55).add(lamp.mul(lit).mul(bright).mul(0.75)))
-        const roomC = mix(room, clothLit, clothA).toVar()
-        // 窓枠（ガラスの面の位置で。縦の召し合わせと、格子の窓は桟）
-        const fr = rect(pg, vec2(frameW), wsz.sub(frameW), fwM).oneMinus()
-        const mid = select(office.greaterThan(0.5).and(type.greaterThan(6.5)), 0.0, band(pg.x, wsz.x.mul(0.5).sub(0.03), wsz.x.mul(0.5).add(0.03), fwM.x)).toVar()
-        If(muntin.greaterThan(0.5), () => {
-          mid.assign(max(mid, band(fract(pg.y.div(wsz.y.div(3.0))), 0.0, float(0.09).div(wsz.y), fwM.y.div(wsz.y))))
-        })
-        If(shopFront, () => {
-          mid.assign(band(fract(pg.x.div(max(1.0, wsz.x.div(3.0)))), 0.0, 0.04, fwM.x))
-        })
-        const frame = max(fr, mid)
-        glassCol.assign(mix(roomC, refl.mul(0.7), clamp(fres.mul(0.85).add(0.04), 0.0, 1.0)))
-        glassCol.addAssign(u0.uSunLight.mul(pow(max(dot(R, u0.uSunDir), 0.0), 300.0)).mul(2.0))
-        glassCol.assign(mix(glassCol, townLight(frameC, N, float(1.0), townShadow(ctx.wp, N)), frame))
-        glassCol.assign(mix(mix(avgRoom, refl, clamp(fres.add(0.06), 0.0, 1.0)), glassCol, graze))
-      })
-    }).Else(() => {
-      // 遠く（窓が画素より小さい）: 部屋の平均の色と映り込み
-      glassCol.assign(mix(avgRoom, refl, clamp(fres.add(0.06), 0.0, 1.0)))
-      If(closed.greaterThan(0.5), () => {
-        const slats = smoothstep(0.3, 0.7, abs(fract(cell.y.div(0.08)).sub(0.5)).mul(2.0)).mul(0.15).add(0.85)
-        glassCol.assign(townLight(vec3(0.38, 0.38, 0.37).mul(slats), N, float(0.9), townShadow(ctx.wp, N)))
-      })
-    })
-    If(open.greaterThan(0.0), () => {
-      // 遠くは窓の面積の割合で平均（ちらつかない）
-      const area = wsz.x.mul(wsz.y).div(bayW.mul(floorH)).mul(inside)
-      const a = mix(open, area, tiny)
-      s.glass.assign(max(s.glass, a))
-      s.glassCol.assign(glassCol)
-    })
-  })
 }
 
 /** 屋根の画素（瓦・スレート・金属・陸屋根のコンクリートと屋上緑化。前の GLSL の roofSurface） */
-function roofSurface(s: Surf, dist: F, ctx: BuildingCtx) {
-  const { vMeta, vRoofC, vKind, vH, vAxis } = ctx.v
-  const wpos = ctx.wp
+function roofSurface(s: Surf, ctx: BuildingCtx) {
+  const { vMeta, vRoofC, vH } = ctx.v
   const N = s.n.toVar()
   const seed = vMeta.z.toVar()
   const style = vMeta.w.toVar()
   const flags = vMeta.y.toVar()
   const flatR = abs(N.y).greaterThan(0.985).toVar()
-  const T = select(flatR, vec3(vAxis.x, 0.0, vAxis.y), normalize(cross(vec3(0.0, 1.0, 0.0), N))).toVar()
-  const Bd = cross(N, T).toVar()
-  const m = vec2(dot(wpos, T), dot(wpos, Bd)).toVar()
   const layer = float(4.0).toVar()
   If(flatR.not(), () => {
     const r = fract(seed.mul(17.9)).toVar()
@@ -1124,60 +865,18 @@ function roofSurface(s: Surf, dist: F, ctx: BuildingCtx) {
         layer.assign(8.0)
       })
   })
-  const sc = layerScale(layer).toVar()
   const base = s.albedo.toVar()
-  const plan = vec2(wpos.x, wpos.z.negate()).toVar()
-  if (paintFlat()) {
-    // 外の塗り（paint.ts）の flat: 質感・むら・汚れを省く。棟の帯・屋上緑化は平らな色で
-    const albedo = base.mul(select(layer.greaterThan(4.5).and(layer.lessThan(5.5)), 0.95, 1.0)).toVar()
-    If(flatR.not(), () => {
-      const tr = vH.z.sub(vH.x).div(max(vH.y.sub(vH.x), 0.01)).toVar()
-      const fwT = fwidth(tr).toVar()
-      const ridgeB = smoothstep(float(0.965).sub(fwT), float(0.985).add(fwT), tr).mul(step(vH.x.add(0.5), vH.y))
-      albedo.assign(mix(albedo, albedo.mul(0.7), ridgeB))
-    }).ElseIf(hasFlag(flags, 4.0), () => {
-      albedo.assign(mix(albedo, vec3(0.07, 0.11, 0.04), 0.75))
-    })
-    s.albedo.assign(albedo)
-    return
-  }
-  const { det, tn } = sampleLayer(vec2(m.x, m.y.negate()).div(sc).add(seed.mul(23.0)), layer, 1.0)
-  const albedo = tintDetail(base, det, select(layer.greaterThan(6.5), 0.15, 0.0)).toVar()
-  const nk = smoothstep(40.0, 220.0, dist).oneMinus()
-  const tnw = vec3(tn.xy.mul(nk), 1.0).toVar()
-  const dirt = vKind.z.toVar()
-  // 屋根のむら（色あせ・苔・汚れ）
-  const rn = oNoise(plan.mul(0.6).add(seed.mul(50.0))).mul(0.6).add(oNoise(plan.mul(2.1).add(seed.mul(9.0))).mul(0.4))
-  albedo.mulAssign(mix(0.5, rn, smoothstep(120.0, 700.0, dist).oneMinus()).mul(0.3).add(0.84))
-  albedo.assign(mix(albedo, vec3(dot(albedo, LUMA)).mul(vec3(0.95, 1.0, 0.9)), dirt.mul(0.3)))
+  // 平らな色（質感・むら・汚れは描かない）。棟の帯・屋上緑化は平らな色で
+  const albedo = base.mul(select(layer.greaterThan(4.5).and(layer.lessThan(5.5)), 0.95, 1.0)).toVar()
   If(flatR.not(), () => {
-    // 棟（棟瓦の帯）と軒先（雨樋の陰）
-    const hRel = vH.z
-    const tr = hRel.sub(vH.x).div(max(vH.y.sub(vH.x), 0.01)).toVar()
+    const tr = vH.z.sub(vH.x).div(max(vH.y.sub(vH.x), 0.01)).toVar()
     const fwT = fwidth(tr).toVar()
     const ridgeB = smoothstep(float(0.965).sub(fwT), float(0.985).add(fwT), tr).mul(step(vH.x.add(0.5), vH.y))
     albedo.assign(mix(albedo, albedo.mul(0.7), ridgeB))
-    albedo.mulAssign(float(1.0).sub(smoothstep(-0.05, 0.12, tr).oneMinus().mul(0.25).mul(dirt)))
-    // 雨の筋（棟から下へ）
-    albedo.mulAssign(float(1.0).sub(dirt.mul(0.18).mul(smoothstep(0.5, 0.85, oNoise(vec2(m.x.mul(1.7).add(seed.mul(20.0)), m.y.mul(0.15)))))))
-    s.spec.assign(select(layer.greaterThan(4.5).and(layer.lessThan(5.5)), 0.25, select(layer.greaterThan(7.5), 0.12, 0.05)))
-  }).Else(() => {
-    // 陸屋根: 防水の継ぎ目と継ぎはぎ、パラペットの際の陰
-    const mx = m.x.div(5.0).toVar()
-    const my = m.y.div(5.0).toVar()
-    const seams = max(band(fract(mx), 0.0, 0.012, fwidth(mx)), band(fract(my), 0.0, 0.012, fwidth(my)))
-    albedo.mulAssign(float(1.0).sub(seams.mul(0.18).mul(smoothstep(60.0, 300.0, dist).oneMinus())))
-    const patchy = step(0.72, oNoise(floor(m.div(3.0)).add(seed.mul(17.0))))
-    albedo.mulAssign(float(1.0).sub(patchy.mul(0.12)))
-    If(hasFlag(flags, 4.0), () => {
-      const g = oNoise(plan.mul(0.9).add(seed.mul(9.0))).mul(0.6).add(oNoise(plan.mul(3.1)).mul(0.4)).toVar()
-      const green = mix(vec3(0.05, 0.09, 0.035), vec3(0.11, 0.15, 0.06), g)
-      const bed = smoothstep(0.35, 0.5, g)
-      albedo.assign(mix(albedo, green, mix(0.75, bed, smoothstep(150.0, 700.0, dist).oneMinus())))
-    })
+  }).ElseIf(hasFlag(flags, 4.0), () => {
+    albedo.assign(mix(albedo, vec3(0.07, 0.11, 0.04), 0.75))
   })
   s.albedo.assign(albedo)
-  s.n.assign(normalize(T.mul(tnw.x).add(Bd.mul(tnw.y)).add(N.mul(tnw.z))))
 }
 
 /** 建物のシェーダー（instanced = 型 × インスタンス、false = 形のある建物） */
@@ -1241,24 +940,11 @@ export function createTownBuildingMaterial(instanced: boolean) {
     If(isRoof.not(), () => {
       wallSurface(s, V, dist, part, ctx)
     }).Else(() => {
-      roofSurface(s, dist, ctx)
+      roofSurface(s, ctx)
     })
     const sh = townShadow(wp, N).toVar()
-    // 外の塗り（paint.ts）の light には、屋根か外壁かを渡す。flat のときは照り返し・映り込みを省く
-    const col = (outdoorPaint()?.light ? select(isRoof, townLight(s.albedo, s.n, s.ao, sh, 'roof'), townLight(s.albedo, s.n, s.ao, sh, 'wall')) : townLight(s.albedo, s.n, s.ao, sh)).toVar()
-    if (!paintFlat()) {
-      // 照り返し（屋根の金属・スレート、カーテンウォールの腰のガラス）
-      col.addAssign(
-        u.uSunLight
-          .mul(pow(max(dot(reflect(V.negate(), s.n), u.uSunDir), 0.0), select(isRoof, 40.0, 200.0)))
-          .mul(s.spec)
-          .mul(sh)
-          .mul(select(isRoof, 1.0, 2.0)),
-      )
-      If(isRoof.not(), () => {
-        col.addAssign(envReflection(reflect(V.negate(), N)).mul(s.spec).mul(0.35))
-      })
-    }
+    // 外の塗り（paint.ts）の light には、屋根か外壁かを渡す（照り返し・映り込みは描かない）
+    const col = select(isRoof, townLight(s.albedo, s.n, s.ao, sh, 'roof'), townLight(s.albedo, s.n, s.ao, sh, 'wall')).toVar()
     // 夜: 街灯・店先の灯りが壁を照らす（灯りの表。近くだけ）
     col.addAssign(paintLampLight(s.albedo, townLamps(wp, s.n)).mul(s.ao))
     col.assign(mix(col, s.glassCol, s.glass))
@@ -1406,15 +1092,9 @@ export function createWindowSprites(all: InstanceSet) {
   const vCoreR = varying(core.div(sprite))
   const cc = uv().mul(2.0).sub(1.0)
   const r = length(cc).toVar()
-  // 外の塗り（paint.ts）の glow を入れたら、点の形はそちら
-  const glow = outdoorPaint()?.glow
-  if (glow) {
-    m.colorNode = vec4(vCol.mul(glow(r, vCoreR)).mul(step(r, 1.0)), 1.0)
-  } else {
-    const coreI = smoothstep(vCoreR.mul(0.45), vCoreR, r).oneMinus()
-    const halo = exp(r.mul(r).mul(-5.0)).mul(0.22)
-    m.colorNode = vec4(vCol.mul(coreI.mul(2.0).add(halo)).mul(step(r, 1.0)), 1.0)
-  }
+  // 点の形は外の塗り（paint.ts）の glow
+  const glow = outdoorPaint().glow
+  m.colorNode = vec4(vCol.mul(glow(r, vCoreR)).mul(step(r, 1.0)), 1.0)
 
   const material = withUniforms(m, uniforms)
   const sprites = new THREE.Sprite(material)

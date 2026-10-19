@@ -24,7 +24,7 @@ export function createClockHands(c: ClockSpec) {
   const hand = (len: number, w: number, dz: number) => {
     const g = new THREE.PlaneGeometry(w, len * 1.18).translate(0, len * 0.41, dz)
     const pivot = new THREE.Group()
-    // 外の塗りを入れていれば、針は平らな色の物の印（監査が読む。描き方は変わらない）
+    // 針は平らな色の物の印（監査が読む。描き方は変わらない）
     pivot.add(new THREE.Mesh(g, markPaint(HAND_MAT, 'flat')))
     root.add(pivot)
     return pivot

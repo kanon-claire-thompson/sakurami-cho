@@ -3,7 +3,6 @@ import {
   Fn,
   If,
   attribute,
-  cameraPosition,
   cos,
   dot,
   float,
@@ -11,13 +10,11 @@ import {
   frontFacing,
   instanceIndex,
   length,
-  max,
   mix,
   mod,
   normalGeometry,
   normalize,
   positionGeometry,
-  pow,
   select,
   sin,
   smoothstep,
@@ -34,7 +31,7 @@ import { townLight } from './facades'
 import { townShadow } from './shadows'
 import { townLampsEx } from './lamps'
 import { sampleGroundFlat } from './townMaterials'
-import { markPaint, paintFlat } from '../paint'
+import { markPaint } from '../paint'
 
 /**
  * 草むら（地面の近くの草の葉。インスタンス、風で揺れる、カメラの近くだけ）。
@@ -132,7 +129,6 @@ interface GrassUniforms {
  */
 function createGrassMaterial(name: string, u: GrassUniforms, height: THREE.Texture) {
   const m = markPaint(unlit(name, { side: THREE.DoubleSide }), 'light')
-  const flat = paintFlat()
   const uHeight = texture(height)
   const aH = attribute<'float'>('aH', 'float')
   // 格子の升（カメラの近くの升から順に、インスタンスの番号で）
@@ -176,28 +172,15 @@ function createGrassMaterial(name: string, u: GrassUniforms, height: THREE.Textu
   const vH = varying(aH)
   const vWorld = varying(wp)
   m.colorNode = Fn(() => {
-    const o = outdoorUniforms
     const wpos = vWorld.toVar()
     const N = normalize(vNormal).toVar()
     If(frontFacing.not(), () => {
       N.assign(vec3(N.x.negate(), N.y, N.z.negate()))
     })
-    if (flat) {
-      // 外の塗り（paint.ts）の flat: 根元と先の 2 段の色を、草の光の式（'grass'）で。逆光の透け・空の光の足しは省く
-      const a = vColor.mul(mix(0.7, 1.08, smoothstep(0.45, 0.55, vH)))
-      const col = townLight(a, N, float(1.0), townShadow(wpos, vec3(0.0, 1.0, 0.0)), 'grass').toVar()
-      col.addAssign(a.mul(townLampsEx(wpos, N, float(0.0), float(0.5))))
-      return outdoorHaze(col, wpos)
-    }
-    const V = normalize(cameraPosition.sub(wpos))
-    // 根元は暗く（株の中の陰）、先は明るく少し黄色く
-    const albedo = vColor.mul(mix(0.45, 1.25, vH)).mul(mix(vec3(1.0), vec3(1.15, 1.08, 0.75), vH.mul(vH).mul(0.5))).toVar()
-    const sh = mix(0.25, 1.0, townShadow(wpos, vec3(0.0, 1.0, 0.0))).toVar()
-    const ao = mix(0.5, 1.0, vH).toVar()
-    const col = townLight(albedo, N, ao, sh).add(albedo.mul(o.uSkyLight).mul(0.25).mul(ao)).toVar()
-    // 逆光で透ける
-    col.addAssign(albedo.mul(o.uSunLight).mul(pow(max(dot(V.negate(), o.uSunDir), 0.0), 4.0)).mul(0.8).mul(sh).mul(vH))
-    col.addAssign(albedo.mul(townLampsEx(wpos, N, float(0.0), float(0.5))).mul(ao))
+    // 根元と先の 2 段の色を、草の光の式（'grass'）で。逆光の透け・空の光の足しは省く
+    const a = vColor.mul(mix(0.7, 1.08, smoothstep(0.45, 0.55, vH)))
+    const col = townLight(a, N, float(1.0), townShadow(wpos, vec3(0.0, 1.0, 0.0)), 'grass').toVar()
+    col.addAssign(a.mul(townLampsEx(wpos, N, float(0.0), float(0.5))))
     return outdoorHaze(col, wpos)
   })()
   return withUniforms(m, u)

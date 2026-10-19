@@ -31,7 +31,6 @@ minor の版を上げる。
 | world | `createTown`・型 `Town`・`TownCreateOptions`・`TownStatus`・`TownClock`・`TownFocus`・`TownFrame`・`TownEventMap` | 町の口（1 ページに 1 つ。根の [README](../README.md) の「自分のアプリに入れる」）と、その引数・読み込みの状態・時計・注目点・毎コマの段（`begin`・`update`・`view` の引数）・出来事 |
 | world | `PALETTE`・`FONTS` | 背景と霧の色・ラボの看板と画面のフォント（下の「フォント」） |
 | world | `configureLab` | ラボの差し込み口（什器の入力の値・差し込み口の中身・画面の描き方・床の映り込みを描くか `floorReflection`。下の「ラボの素材の名前と床の映り込み」） |
-| world | `configureOutdoorPaint`・型 `OutdoorPaint`・`PaintSurface` | 外の塗りの口（町・空・水・地形・建物・木・乗り物・名前のある建物とその中の光と色の式を差し替える。入れなければ前の見た目のまま。下の「外の塗り」） |
 | world | `createFollowCamera`・型 `FollowCamera`・`FollowCameraOptions`・`FollowTarget` | 人を追うカメラ（下の「カメラ・直接の操作・ワープ」） |
 | character | `createCharacter`・型 `Character`・`CharacterOptions`・`CharacterSpawnPoint`・`CharacterDriver` | キャラクター（1 人ずつのインスタンス）と、毎コマ動かす所（`ch.drivers.motion`・`travel`）の型 |
 | character | `createCharacterVisual`・型 `CharacterVisual`・`CharacterVisualOptions`・`CharacterVisualStatus`・`CharacterVisualClip`・`VISUAL_DEFAULTS`・型 `VisualConfig` | 見た目（VRM と待機・歩き・跳ぶ・身ぶりの `.vrma`）と既定の値。`CharacterVisual` の `start()`・`stop()`・`update()`・片付ける `dispose()` |

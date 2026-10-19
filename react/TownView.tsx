@@ -6,7 +6,7 @@ import type { Town } from '../world/createTown'
 import type { Lab } from '../world/lab/createLab'
 import { labOptions } from '../world/lab/labHost'
 import type { LabPlacement } from '../core/lab/placements'
-import { labTextureUrls, type LabFloorTextures, type LabTextureUrls } from '../world/lab/textures'
+import { labTextureUrls, type LabTextureUrls } from '../world/lab/textures'
 import type { LabTextures } from '../world/materials/labMaterials'
 import { townOptions, type TownFrame } from '../world/townHost'
 import { LabContext, LabMaterialsContext, useLab } from './labHooks'
@@ -19,7 +19,7 @@ import { LabAnimeView } from './AnimeView'
  *
  * - TownClock: town.begin（優先度 −90。時計と外の状態。Suspense の外に置き、ラボのテクスチャを待つ間も進める）
  * - TownExposure: town.exposure（優先度 0.95。カメラ・撮影の構図・揺れのあと、描く前）
- * - TownRoot: テクスチャ（共有 7 枚と床 3 枚）を読み終えるまで待ち（Suspense の内側に置く。待つのはここだけ）、ラボを 1 回だけ作って
+ * - TownRoot: テクスチャ（パンチングメタルの穴の形 1 枚）を読み終えるまで待ち（Suspense の内側に置く。待つのはここだけ）、ラボを 1 回だけ作って
  *   （town.buildLab）子に配る。照明の差し込み口・キットの入力の値と差し込み口はラボの口（world/lab/labHost.ts の configureLab）から。
  *   捨てるのは本当に外したときだけ
  * - TownView: ラボの照明・外の光・遠景・殻・什器を場面に置き（この順。外の光と遠景は描く時に town.buildOutdoor。モジュールに 1 つで、作り直さず
@@ -85,8 +85,6 @@ export function TownRoot({ town, children, placements }: { town: Town; children:
   const get = useThree((s) => s.get)
   const urls = labUrls()
   const shared = useTexture(urls.shared) as unknown as LabTextures
-  // 床（殻が下ごしらえして使う）もここで待っておく（中の部品が待って作り直されないように）
-  const floor = useTexture(urls.floor) as unknown as LabFloorTextures
 
   // 画素の比は作った時の物で始め、変わったら LabAtmosphere が入れる
   const lab = useMemo(
@@ -94,12 +92,12 @@ export function TownRoot({ town, children, placements }: { town: Town; children:
       town.buildLab({
         renderer: gl as unknown as WebGPURenderer,
         scene,
-        textures: { shared, floor },
+        textures: { shared },
         pixelRatio: get().viewport.dpr,
         placements,
         host: labOptions(),
       }),
-    [town, gl, scene, get, shared, floor, placements],
+    [town, gl, scene, get, shared, placements],
   )
   // 捨てるのは本当に外したときだけ（StrictMode の effect の 2 回目の「外す → 付け直す」では捨てない。捨てると、最初のコマで GPU に上げた
   // 形・撮る先・影の地図が一度消えて上げ直しになり、画に出ない所の形の数が撮るたびに揺れる。4-4 の殻と同じ。照明と空気も 4-5 からこの形）

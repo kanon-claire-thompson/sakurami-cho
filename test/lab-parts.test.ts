@@ -63,7 +63,6 @@ interface ScreensMod {
 }
 interface TexturesMod {
   prepareLabSharedTextures(t: Record<string, THREE.Texture>): Record<string, THREE.Texture>
-  prepareLabFloorTextures(t: Record<string, THREE.Texture>): Record<string, THREE.Texture>
 }
 interface LabLightMod {
   setLabLight(room: number, flash?: number): void
@@ -99,8 +98,7 @@ afterAll(() => {
   ;(globalThis as { document?: unknown }).document = realDocument
 })
 
-const sharedTextures = () =>
-  Object.fromEntries(['brushedNormal', 'brushedRough', 'panelNormal', 'panelRough', 'perfOpacity', 'perfNormal', 'smudge'].map((k) => [k, new THREE.Texture()]))
+const sharedTextures = () => ({ perfOpacity: new THREE.Texture() })
 
 describe('ラボの素材・部品・画面の three の形（段 4 の 4-2）', () => {
   test('MatrixInstances・BoxInstances は影を受けて落とさない。BoxInstances の既定の形は 1 つを使い回し、色はどれかに c があるときだけ', async () => {
@@ -229,7 +227,7 @@ describe('ラボの素材・部品・画面の three の形（段 4 の 4-2）',
     bare.dispose()
   })
 
-  test('パンチングメタルは呼ぶたびに素材を 1 つ作り、穴と法線のテクスチャを写して repeat を変える', async () => {
+  test('パンチングメタルは呼ぶたびに素材を 1 つ作り、穴のテクスチャを写して repeat を変える', async () => {
     const M = await load<MaterialsMod>('../world/materials/labMaterials.ts')
     const mats = M.createLabMaterials(sharedTextures())
     const a = M.perforatedMaterial(mats, 10, 2)
@@ -237,7 +235,7 @@ describe('ラボの素材・部品・画面の three の形（段 4 の 4-2）',
     expect(a).not.toBe(b)
     expect(a.alphaMap).not.toBe(mats.perforated.alphaMap)
     expect(a.alphaMap?.repeat.toArray()).toEqual([10, 2])
-    expect(a.normalMap?.wrapS).toBe(THREE.RepeatWrapping)
+    expect([a.alphaMap?.wrapS, a.normalMap]).toEqual([THREE.RepeatWrapping, null])
     expect(mats.perforated.alphaMap?.repeat.toArray()).toEqual([1, 1])
   })
 
@@ -266,13 +264,11 @@ describe('ラボの素材・部品・画面の three の形（段 4 の 4-2）',
     expect(calls).toEqual(['base 0.05', 'next 0.15', 'base 0.25'])
   })
 
-  test('テクスチャの下ごしらえ: 共有は繰り返し・異方性 8・リニア、床は 3m 四方の repeat・異方性 16・色だけ sRGB', async () => {
+  test('テクスチャの下ごしらえ: パンチングメタルの穴の形 1 枚を、繰り返し・異方性 8・リニアに', async () => {
     const T = await load<TexturesMod>(`${LAB}/textures.ts`)
     const shared = T.prepareLabSharedTextures(sharedTextures())
+    expect(Object.keys(shared)).toEqual(['perfOpacity'])
     for (const t of Object.values(shared)) expect([t.wrapS, t.wrapT, t.anisotropy, t.colorSpace]).toEqual([THREE.RepeatWrapping, THREE.RepeatWrapping, 8, THREE.NoColorSpace])
-    const floor = T.prepareLabFloorTextures({ map: new THREE.Texture(), normalMap: new THREE.Texture(), roughnessMap: new THREE.Texture() })
-    expect([floor.map!.colorSpace, floor.normalMap!.colorSpace, floor.roughnessMap!.anisotropy]).toEqual([THREE.SRGBColorSpace, THREE.NoColorSpace, 16])
-    expect(floor.map!.repeat.toArray()).toEqual([16.8 / 3, 7.54 / 3].map((v) => expect.closeTo(v, 12)) as never)
   })
 
   test('明るさの入力の暗くする関数は、min〜1 の割合を受け、外す関数で外れる', async () => {

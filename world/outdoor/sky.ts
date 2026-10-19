@@ -37,7 +37,7 @@ function localSiderealAngle(utcMs: number) {
 /** 空の球と星を作る（最初の 1 回だけ） */
 function createSky() {
   const high = townHighQuality()
-  const sky = new THREE.Mesh(new THREE.SphereGeometry(SKY_RADIUS, 64, 32), createSkyMaterial(high))
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(SKY_RADIUS, 64, 32), createSkyMaterial())
   sky.renderOrder = 20
   sky.frustumCulled = false
 

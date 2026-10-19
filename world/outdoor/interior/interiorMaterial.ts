@@ -24,7 +24,6 @@ import {
   normalize,
   positionWorld,
   pow,
-  reflect,
   select,
   sin,
   smoothstep,
@@ -37,10 +36,10 @@ import {
   vec3,
   vec4,
 } from 'three/tsl'
-import { oHash, oNoise, outdoorHaze, outdoorUniforms, skyColor, unlit, withUniforms } from '../materials'
+import { oHash, oNoise, outdoorHaze, outdoorUniforms, unlit, withUniforms } from '../materials'
 import { arrayUniform, bAlb, bNrm, namedSurface, surfaceVaryings, type SurfaceState } from '../named/namedMaterial'
 import { shadowTap, townShadow, townShadowUniforms } from '../town/shadows'
-import { markPaint, outdoorPaint, paintEmit, paintFlat } from '../paint'
+import { markPaint, outdoorPaint, paintEmit } from '../paint'
 
 type Node<T = unknown> = THREE.Node<T>
 type F = Node<'float'>
@@ -415,16 +414,8 @@ function interiorLight(u: InteriorUniforms) {
       const sun = interiorSun(wp, N)
       diffuse.assign(win.mul(mix(0.75, 1.0, ao)).add(o.uSunLight.mul(u.uISun).mul(sun)).add(lamp.acc).add(amb.mul(ao).mul(up.mul(0.35).add(0.75))))
     })
-    // 外の塗り（paint.ts）の interior を入れたら、光はそちら（つやの照り返し・映り込みは足さない）
-    const paint = outdoorPaint()
-    if (paint?.interior) return paint.interior(albedo.mul(metal.mul(-0.6).add(1.0)), diffuse, amb, N, ao)
-    const col = albedo.mul(metal.mul(-0.6).add(1.0)).mul(diffuse).toVar()
-    const f0 = mix(0.04, 0.7, metal).toVar()
-    const fres = f0.add(f0.oneMinus().mul(pow(clamp(dot(N, V).oneMinus(), 0.0, 1.0), 5.0))).toVar()
-    col.addAssign(lamp.spec.mul(gloss).mul(fres).mul(2.0).mul(mix(vec3(1.0), albedo.mul(2.0), metal)))
-    // 映り込み: 窓の光と部屋の明るさをぼんやり
-    col.addAssign(amb.mul(1.2).add(win.mul(0.35)).mul(fres).mul(mix(gloss.mul(0.5), 0.9, metal)).mul(ao).mul(mix(vec3(1.0), albedo.mul(2.5), metal)))
-    return col
+    // 光は外の塗り（paint.ts）の interior（つやの照り返し・映り込みは足さない）
+    return outdoorPaint().interior(albedo.mul(metal.mul(-0.6).add(1.0)), diffuse, amb, N, ao)
   }
 
   return { interiorShade }
@@ -502,52 +493,20 @@ export function createInteriorGlassMaterial(u: InteriorUniforms) {
   const o = outdoorUniforms
   const m = markPaint(unlit('interiorGlass', { transparent: true, depthWrite: false, side: THREE.DoubleSide }), 'window')
   const vNormal = varying(normalize(modelWorldMatrix.mul(vec4(normalLocal, 0.0)).xyz))
-  const glass = paintFlat() ? outdoorPaint()?.glass : undefined
-  if (glass) {
-    // 外の塗り（paint.ts）の flat: 外から見るガラスは塗りの式、中から見るガラスは部屋の明るさの平らな映り（映り込み・きらめき・くもりは描かない）
-    m.colorNode = Fn(() => {
-      const wp = positionWorld
-      const N = normalize(vNormal).toVar()
-      const V = normalize(cameraPosition.sub(wp)).toVar()
-      const out = vec4(0.0).toVar()
-      If(dot(N, V).greaterThan(0.0), () => {
-        out.assign(glass(N, V, wp, vec3(0.0)))
-      }).Else(() => {
-        const dark = smoothstep(0.02, 0.4, dot(o.uSkyLight, vec3(0.33))).oneMinus()
-        out.assign(vec4(u.uIRefl, dark.mul(0.1).add(0.08)))
-      })
-      return vec4(outdoorHaze(out.rgb, wp), out.a)
-    })()
-    return withUniforms(m, u)
-  }
+  const glass = outdoorPaint().glass
+  // 外から見るガラスは外の塗り（paint.ts）の glass、中から見るガラスは部屋の明るさの平らな映り（映り込み・きらめき・くもりは描かない）
   m.colorNode = Fn(() => {
-    const alpha = float(0.0).toVar()
     const wp = positionWorld
     const N = normalize(vNormal).toVar()
     const V = normalize(cameraPosition.sub(wp)).toVar()
-    const ndv = dot(N, V).toVar()
-    const fres = pow(clamp(abs(ndv).oneMinus(), 0.0, 1.0), 5.0).mul(0.95).add(0.05).toVar()
-    const smudge = oNoise(wp.xy.mul(2.3).add(wp.z)).mul(0.5).add(oNoise(wp.zy.mul(9.0)).mul(0.5)).toVar()
-    const col = vec3(0.0).toVar()
-    If(ndv.greaterThan(0.0), () => {
-      const R = reflect(V.negate(), N).toVar()
-      const refl = vec3(0.0).toVar()
-      If(R.y.greaterThan(0.0), () => {
-        refl.assign(skyColor(R))
-      }).Else(() => {
-        refl.assign(mix(skyColor(vec3(R.x, 0.02, R.z)).mul(0.45), o.uSkyLight.mul(0.25).add(o.uSunLight.mul(0.03)), smoothstep(0.0, 0.25, R.y.negate())))
-      })
-      const spec = pow(max(dot(R, o.uSunDir), 0.0), 900.0).mul(30.0).mul(smoothstep(-0.02, 0.05, o.uSunDir.y))
-      col.assign(refl.add(o.uSunLight.mul(spec)))
-      alpha.assign(clamp(fres.mul(0.85).add(0.05).add(smudge.mul(0.03)), 0.0, 0.9))
+    const out = vec4(0.0).toVar()
+    If(dot(N, V).greaterThan(0.0), () => {
+      out.assign(glass(N, V, wp, vec3(0.0)))
     }).Else(() => {
-      // 中から: 部屋の明るさの映り込み（外が暗いほど強く見える）
-      col.assign(u.uIRefl)
       const dark = smoothstep(0.02, 0.4, dot(o.uSkyLight, vec3(0.33))).oneMinus()
-      alpha.assign(clamp(fres.mul(0.7).add(0.03).add(dark.mul(0.1)).add(smudge.mul(0.03)), 0.0, 0.85))
+      out.assign(vec4(u.uIRefl, dark.mul(0.1).add(0.08)))
     })
-    // 色と透け具合（alpha は材質の不透明度に掛かる）
-    return vec4(outdoorHaze(col, wp), alpha)
+    return vec4(outdoorHaze(out.rgb, wp), out.a)
   })()
   return withUniforms(m, u)
 }

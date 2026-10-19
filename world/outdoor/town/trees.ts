@@ -13,7 +13,6 @@ import {
   floor,
   fract,
   fwidth,
-  int,
   length,
   log2,
   max,
@@ -25,7 +24,6 @@ import {
   normalize,
   positionGeometry,
   positionWorld,
-  pow,
   select,
   sin,
   smoothstep,
@@ -39,12 +37,12 @@ import {
 } from 'three/tsl'
 import type { Node } from 'three/webgpu'
 import { SITE } from '../../../core/town'
-import { oHash, oNoise, outdoorHaze, outdoorUniforms, unlit, withUniforms } from '../materials'
+import { oHash, outdoorHaze, outdoorUniforms, unlit, withUniforms } from '../materials'
 import { townLight } from './facades'
 import { depthMaterial, townShadow } from './shadows'
 import { townTextureUniforms } from './townTextures'
 import { townLampsEx } from './lamps'
-import { markPaint, paintEmit, paintFlat } from '../paint'
+import { markPaint, paintEmit } from '../paint'
 import type { TownTile } from './townData'
 import { LANE_CORRIDOR_HALF_W, laneCorridor, type CorridorHit } from '../../walk/laneCorridor'
 
@@ -336,10 +334,10 @@ export function createTreeMaterials() {
 
   /** ガラスの温室（ガーデンドーム）の中の木だけが使う光（夜の中の灯りの照り返し・葉脈ライティングの光の点）。町の木は 0。画素の Fn の中で呼ぶ */
   const domeGlow = (albedo: V3, ao: F, wp: V3, seed: F, leaf: F) => {
-    // 外の塗り（paint.ts）の flat は、まわりの明るさを強めに足す（質感・透ける光の分が無いので、夕方のドームの中の木がほぼ黒い塊だった）
-    const c = albedo.mul(uniforms.uExtraAmb).mul(ao.mul(0.4).add(0.6)).mul(paintFlat() ? 4.5 : 1.6).toVar()
-    // 平らな塗りは、温室の中の木（まわりの明るさが入っている物だけ）に空の光も平らに足す（夕方は中の灯りが弱く、まわりの明るさだけでは足りなかった）
-    if (paintFlat()) c.addAssign(albedo.mul(u.uSkyLight).mul(0.9).mul(ao).mul(step(1e-6, dot(uniforms.uExtraAmb, vec3(1.0)))))
+    // まわりの明るさを強めに足す（質感・透ける光の分が無いので、夕方のドームの中の木がほぼ黒い塊だった）
+    const c = albedo.mul(uniforms.uExtraAmb).mul(ao.mul(0.4).add(0.6)).mul(4.5).toVar()
+    // 温室の中の木（まわりの明るさが入っている物だけ）に空の光も平らに足す（夕方は中の灯りが弱く、まわりの明るさだけでは足りなかった）
+    c.addAssign(albedo.mul(u.uSkyLight).mul(0.9).mul(ao).mul(step(1e-6, dot(uniforms.uExtraAmb, vec3(1.0)))))
     If(uniforms.uVein.greaterThan(0.0).and(leaf.greaterThan(0.5)), () => {
       const breath = sin(t.mul(0.55)).mul(0.38).add(0.62)
       // 光の点: 3 次元の升（0.45m）ごとに 1 つ、升の中の決まった所に小さな丸い光（前は升の面がそのまま光って、明るい四角の板に見えた）
@@ -348,8 +346,8 @@ export function createTreeMaterials() {
       const hsh = oHash(cell.xz.add(cell.y.mul(17.31)).add(seed.mul(31.0)))
       const ctr = vec3(oHash(cell.xz.add(3.7).add(cell.y)), oHash(cell.zx.add(9.1).add(cell.y)), oHash(cell.xz.mul(1.3).add(5.3).add(cell.y))).mul(0.6).add(0.2)
       const r = length(g.sub(cell).sub(ctr))
-      // 外の塗り（paint.ts）の flat: 光の点は縁のくっきりした丸（光る物の色の式 emit に通す）
-      const sp = paintFlat() ? step(0.7, hsh).mul(smoothstep(0.155, 0.16, r).oneMinus()).mul(1.4) : step(0.8, hsh).mul(smoothstep(0.06, 0.2, r).oneMinus())
+      // 光の点は縁のくっきりした丸（光る物の色の式 emit に通す）
+      const sp = step(0.7, hsh).mul(smoothstep(0.155, 0.16, r).oneMinus()).mul(1.4)
       const flow = sin(wp.y.mul(1.4).sub(t.mul(1.1)).add(seed.mul(12.0))).mul(0.45).add(0.55)
       c.addAssign(paintEmit(vec3(0.55, 1.0, 0.32).mul(sp.mul(1.2).mul(flow).add(0.008)).mul(uniforms.uVein).mul(breath)))
     })
@@ -418,7 +416,6 @@ export function createTreeMaterials() {
   const near = markPaint(unlit('townTreesNear', { side: THREE.DoubleSide, alphaToCoverage: true }), 'light')
   near.positionNode = nearPosition
   near.colorNode = Fn(() => {
-    const flat = paintFlat()
     const wp = positionWorld.toVar()
     const N = normalize(vNormal).toVar()
     const V = normalize(cameraPosition.sub(wp)).toVar()
@@ -426,48 +423,19 @@ export function createTreeMaterials() {
     const ao = vAo.toVar()
     const leaf = vUv.z.greaterThan(-0.5).toVar()
     // 葉の絵は分岐の外で読む（ミップマップの微分が、分岐でばらばらの画素の組でも正しくなるように）
-    // 平らな塗り（外の塗り paint.ts の flat）は、葉の形をぼかして太らせ、葉の塊の形にする（細かい穴に輪郭線が細かく出ないように）
-    const f = (flat ? foliage(vec2(vUv.x, vUv.y.oneMinus()), vUv.z, 2.0) : foliage(vec2(vUv.x, vUv.y.oneMinus()), vUv.z)).toVar()
-    const fa = foliageAlpha(f.a, vUv.xy, flat ? 0.5 : 0.12).toVar()
+    // 葉の形をぼかして太らせ、葉の塊の形にする（細かい穴に輪郭線が細かく出ないように）
+    const f = foliage(vec2(vUv.x, vUv.y.oneMinus()), vUv.z, 2.0).toVar()
+    const fa = foliageAlpha(f.a, vUv.xy, 0.5).toVar()
     // 横から見た板（葉が点の列に見える）は消す
     const facing = abs(dot(normalize(vCardN), V))
     If(leaf.and(fa.mul(smoothstep(0.12, 0.4, facing)).lessThan(0.5)), () => {
       Discard()
     })
-    if (flat) {
-      // 平らな塗り（外の塗り paint.ts の flat）: 葉は木の種類・季節の色の塊（葉の絵は形だけ）、幹は 1 色
-      albedo.assign(select(leaf, vLeaf.mul(FLAT_LEAF), vec3(0.03, 0.024, 0.02)))
-      const sh = flatLeafShadow(townShadow(wp, N))
-      const col = townLight(albedo, N, ao, sh, 'tree').toVar()
-      col.addAssign(domeGlow(albedo, ao, wp, vSeed, select(leaf, float(1.0), float(0.0))))
-      col.addAssign(albedo.mul(townLampsEx(wp, N, float(0.0), float(0.45))).mul(0.8).mul(ao))
-      return outdoorHaze(col, wp)
-    }
-    If(leaf.not(), () => {
-      // 幹と枝: 樹皮の質感
-      const bark = townTextureUniforms.uGndAlb.sample(vec2(vUv.x.mul(2.0), vUv.y)).depth(int(6)).rgb.mul(2.0)
-      albedo.assign(vec3(0.075, 0.06, 0.05).mul(pow(max(bark, 0.0), vec3(2.2))))
-    }).Else(() => {
-      albedo.assign(pow(f.rgb, vec3(2.2)).mul(vLeaf).mul(1.1))
-      // 葉のかたまりごとの明るさのばらつき（板ごとに一様な色に見えないように）
-      albedo.mulAssign(oNoise(wp.xz.mul(0.9).add(wp.y.mul(0.7)).add(vSeed.mul(13.0))).mul(0.44).add(0.78))
-    })
-    // 葉は光を通して散らすので、影の中でも真っ暗にならない（影は浅く、空の光をよく受ける）
-    const sh = townShadow(wp, N).toVar()
-    If(leaf, () => {
-      sh.assign(leafShadow(sh))
-    })
-    const col = townLight(albedo, N, ao, sh).add(albedo.mul(u.uSkyLight).mul(0.45).mul(ao)).toVar()
-    // 逆光の葉が透ける
-    If(leaf, () => {
-      col.addAssign(albedo.mul(u.uSunLight).mul(pow(max(dot(V.negate(), u.uSunDir), 0.0), 3.0)).mul(0.6).mul(sh))
-      // 下から見上げた樹冠（段階 5 の植物の仕上げ）: 葉は空と太陽の光を通して黄緑に明るい（前は下を向いた面の暗さだけで、見上げると黒い塊だった）
-      const under = smoothstep(0.05, 0.7, V.y.negate())
-      const thru = albedo.mul(vec3(1.1, 1.25, 0.6))
-      col.addAssign(thru.mul(u.uSkyLight.mul(0.55).add(u.uSunLight.mul(0.3).mul(sh).mul(max(u.uSunDir.y, 0.0)))).mul(under).mul(ao.mul(0.55).add(0.45)))
-    })
+    // 葉は木の種類・季節の色の塊（葉の絵は形だけ）、幹は 1 色
+    albedo.assign(select(leaf, vLeaf.mul(FLAT_LEAF), vec3(0.03, 0.024, 0.02)))
+    const sh = flatLeafShadow(townShadow(wp, N))
+    const col = townLight(albedo, N, ao, sh, 'tree').toVar()
     col.addAssign(domeGlow(albedo, ao, wp, vSeed, select(leaf, float(1.0), float(0.0))))
-    // 夜: 街灯の下の葉（下から照らされる。葉は光を通すので回り込みを大きく）
     col.addAssign(albedo.mul(townLampsEx(wp, N, float(0.0), float(0.45))).mul(0.8).mul(ao))
     return outdoorHaze(col, wp)
   })()
@@ -510,24 +478,15 @@ export function createTreeMaterials() {
     const ao = float(0.6).toVar()
     const leafy = a.greaterThanEqual(0.5).toVar()
     If(leafy, () => {
-      albedo.assign(pow(f.rgb, vec3(2.2)).mul(vLeaf).mul(0.95))
       // 樹冠を球とみなした法線（板の位置から）
       const q = vec2(cuv.x.sub(0.5), cuv.y.sub(0.5)).mul(2.0).toVar()
       const z = sqrt(max(0.0, min(1.0, dot(q, q)).oneMinus()))
       N.assign(normalize(vRight.mul(q.x).add(vec3(0.0, 1.0, 0.0).mul(q.y.mul(0.8).add(0.25))).add(vToCam.mul(z.add(0.2)))))
       ao.assign(smoothstep(-0.1, 0.9, cuv.y).mul(0.55).add(0.45))
     })
-    if (paintFlat()) {
-      // 平らな塗り: 葉の色の塊を、樹冠を球とみなした法線で 3 段に（外の塗りの light）
-      albedo.assign(select(leafy, vLeaf.mul(FLAT_LEAF), vec3(0.03, 0.024, 0.02)))
-      const col = townLight(albedo, N, ao, flatLeafShadow(townShadow(wp, N)), 'tree').toVar()
-      col.addAssign(domeGlow(albedo, ao, wp, vSeed, select(leafy, float(1.0), float(0.0))))
-      return outdoorHaze(col, wp)
-    }
-    const sh = leafShadow(townShadow(wp, N)).toVar()
-    const col = townLight(albedo, N, ao, sh).add(albedo.mul(u.uSkyLight).mul(0.45).mul(ao)).toVar()
-    const V = normalize(cameraPosition.sub(wp))
-    col.addAssign(albedo.mul(u.uSunLight).mul(pow(max(dot(V.negate(), u.uSunDir), 0.0), 3.0)).mul(0.5).mul(sh))
+    // 葉の色の塊を、樹冠を球とみなした法線で 3 段に（外の塗りの light）
+    albedo.assign(select(leafy, vLeaf.mul(FLAT_LEAF), vec3(0.03, 0.024, 0.02)))
+    const col = townLight(albedo, N, ao, flatLeafShadow(townShadow(wp, N)), 'tree').toVar()
     col.addAssign(domeGlow(albedo, ao, wp, vSeed, select(leafy, float(1.0), float(0.0))))
     return outdoorHaze(col, wp)
   })()

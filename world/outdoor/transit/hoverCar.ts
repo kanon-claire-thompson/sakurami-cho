@@ -13,10 +13,8 @@ import {
   length,
   max,
   mix,
-  normalize,
   positionGeometry,
   positionWorld,
-  reflect,
   select,
   smoothstep,
   step,
@@ -25,13 +23,13 @@ import {
   vec2,
   vec3,
 } from 'three/tsl'
-import { oNoise, outdoorHaze, outdoorUniforms, unlit, withUniforms } from '../materials'
+import { outdoorHaze, outdoorUniforms, unlit, withUniforms } from '../materials'
 import { GeoBuilder } from '../site/builder'
 import { townLight } from '../town/facades'
 import { townLamps } from '../town/lamps'
 import { townShadow } from '../town/shadows'
-import { envRefl, facingNormal, matAttr, metalFresnel, sunSpecular, vertexColorAttr } from './transitMaterial'
-import { markPaint, paintEmit, paintFlat } from '../paint'
+import { facingNormal, matAttr, vertexColorAttr } from './transitMaterial'
+import { markPaint, paintEmit } from '../paint'
 
 /**
  * 花音のホバーの一人乗り（私物。docs/design/town.md §21・§7 の 211〜）の形と描き方。
@@ -406,7 +404,6 @@ function fan(g: GeoBuilder, fz: number) {
 /** ホバーの色（不透明。局所の座標で模様と羽根を回す） */
 function hoverColor(u2: HoverUniforms) {
   const u = outdoorUniforms
-  const flat = paintFlat()
   return Fn(() => {
     const wp = positionWorld.toVar()
     const N = facingNormal().toVar()
@@ -414,7 +411,6 @@ function hoverColor(u2: HoverUniforms) {
     const mat = matAttr().toVar()
     const id = floor(mat.x.add(0.5)).toVar()
     const aux = mat.y.toVar()
-    const V = normalize(cameraPosition.sub(wp)).toVar()
     const dist = length(cameraPosition.sub(wp)).toVar()
     const vColor = vertexColorAttr().toVar()
     const albedo = vec3(vColor).toVar()
@@ -423,7 +419,6 @@ function hoverColor(u2: HoverUniforms) {
     const emit = vec3(0.0).toVar()
     If(id.lessThan(0.5), () => {
       gloss.assign(aux.mul(0.6).add(0.25))
-      if (!flat) albedo.mulAssign(oNoise(vLocal.xz.mul(9.0).add(vLocal.y.mul(3.0))).mul(0.04).add(0.97))
     })
       .ElseIf(id.lessThan(1.5), () => {
         gloss.assign(aux.mul(0.3).add(0.06))
@@ -435,11 +430,9 @@ function hoverColor(u2: HoverUniforms) {
       .ElseIf(id.lessThan(2.5), () => {
         metal.assign(1.0)
         gloss.assign(select(aux.greaterThan(0.5), 0.6, 0.78))
-        if (!flat) albedo.mulAssign(oNoise(vLocal.xz.mul(40.0)).mul(0.08).add(0.92))
       })
       .ElseIf(id.lessThan(3.5), () => {
         gloss.assign(0.32)
-        if (!flat) albedo.mulAssign(oNoise(vLocal.xz.mul(60.0)).mul(0.1).add(0.9).add(vLocal.z.mul(90.0).sin().mul(0.05)))
       })
       .ElseIf(id.lessThan(4.5), () => {
         albedo.assign(vColor.mul(0.45))
@@ -478,13 +471,7 @@ function hoverColor(u2: HoverUniforms) {
       })
     const sh = townShadow(wp, N).toVar()
     const col = townLight(albedo.mul(metal.mul(-0.6).add(1.0)), N, 1.0, sh, 'vehicle').toVar()
-    // 外の塗り（paint.ts）の flat: つやの照り返し・映り込みを省く
-    if (!flat) {
-      const fres = metalFresnel(metal, N, V).toVar()
-      col.addAssign(sunSpecular(N, V, gloss, fres, sh))
-      const R = reflect(V.negate(), N)
-      col.addAssign(envRefl(R).mul(fres).mul(mix(gloss.mul(0.5), 0.9, metal)).mul(mix(vec3(1.0), albedo.mul(2.0), metal)))
-    }
+    // つやの照り返し・映り込みは描かない
     col.addAssign(albedo.mul(townLamps(wp, N)).mul(0.7))
     col.assign(outdoorHaze(col, wp))
     col.addAssign(paintEmit(emit).mul(exp(dist.negate().div(u.uHazeDist.mul(1.5)))))

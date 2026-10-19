@@ -104,7 +104,7 @@ function eachLamp(wp: V3, each: (t: Node<'vec4'>, fade: Node<'float'>) => void) 
 
 /** townLamps の中身: skipNamed = 1 なら名前のある建物の灯具（named）を除く、wrap = 面の向きの回り込み */
 export const townLampsEx = Fn(([wp, N, skipNamed, wrap]: [V3, V3, Node<'float'>, Node<'float'>]) => {
-  const falloff = outdoorPaint()?.lampFalloff
+  const falloff = outdoorPaint().lampFalloff
   const acc = vec3(0.0).toVar()
   eachLamp(wp, (t, fade) => {
     const kind = floor(t.w).toVar()
@@ -128,8 +128,8 @@ export const townLampsEx = Fn(([wp, N, skipNamed, wrap]: [V3, V3, Node<'float'>,
     const spot = smoothstep(-0.25, 0.55, l.y).mul(0.7).add(0.3)
     const ndl = max(dot(N, l), 0.0).mul(wrap.oneMinus()).add(wrap)
     const att0 = power.div(d2.mul(0.09).add(1.0)).mul(smoothstep(R.mul(0.45), R, d).oneMinus())
-    // 外の塗り（paint.ts）の lampFalloff を入れたら、減り方はそちら
-    const att = falloff ? falloff(att0, power, d, R) : att0
+    // 減り方は外の塗り（paint.ts）の lampFalloff
+    const att = falloff(att0, power, d, R)
     acc.addAssign(k.xyz.mul(att).mul(ndl).mul(spot).mul(fade))
   })
   return acc

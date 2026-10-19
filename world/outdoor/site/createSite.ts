@@ -39,10 +39,10 @@ export interface LabSite {
   dispose(): void
 }
 
-export function createLabSite(anisotropy: number, treeMat: TreeMaterials | null): LabSite {
+export function createLabSite(treeMat: TreeMaterials | null): LabSite {
   const group = new THREE.Group()
   group.name = 'labSite'
-  const mat = createSiteMaterial(anisotropy)
+  const mat = createSiteMaterial()
   const depth = depthMaterial()
   const shell = buildShell()
   const grounds = buildSite()

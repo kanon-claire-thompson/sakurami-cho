@@ -20,7 +20,6 @@ import {
   normalize,
   positionGeometry,
   positionWorld,
-  reflect,
   select,
   sign,
   smoothstep,
@@ -31,14 +30,13 @@ import {
   vec2,
   vec3,
 } from 'three/tsl'
-import { oHash, oNoise, outdoorHaze, outdoorUniforms, withUniforms } from '../materials'
+import { outdoorHaze, outdoorUniforms, withUniforms } from '../materials'
 import { GeoBuilder } from '../site/builder'
-import { townLight } from '../town/facades'
 import { townLamps } from '../town/lamps'
 import { townShadow } from '../town/shadows'
-import { ObjectNodeMaterial, envRefl, facingNormal, localFrame, matAttr, metalFresnel, sunSpecular, vertexColorAttr, woodGrain } from './transitMaterial'
+import { ObjectNodeMaterial, facingNormal, localFrame, matAttr, vertexColorAttr } from './transitMaterial'
 import { detailGlassColor as cableGlassColorBase } from './vehicleDetail'
-import { markPaint, paintEmit, paintFlat } from '../paint'
+import { markPaint, paintEmit } from '../paint'
 import { cabinLight } from '../paintParts'
 
 type Node<T = unknown> = THREE.Node<T>
@@ -676,7 +674,7 @@ function plateTexture() {
 }
 
 /**
- * 外の塗り（paint.ts）の flat のときの細かい車両の不透明な面の色: むら・木目・織りの目・照り返し・映り込みを省き、材質の番号ごとの平らな色
+ * 細かい車両の不透明な面の色: むら・木目・織りの目・照り返し・映り込みは描かず、材質の番号ごとの平らな色
  * （板の目地・名前の板の字は形のまま）を、外は面の光の式・中は中の光の式（窓から入る日なたと空の光・区画の天井の灯り）で塗る
  */
 function flatCableCarColor(builder: THREE.NodeBuilder) {
@@ -753,158 +751,7 @@ function flatCableCarColor(builder: THREE.NodeBuilder) {
 
 /** 細かい車両の不透明な面の色 */
 function cableCarColor(builder: THREE.NodeBuilder) {
-  const u = outdoorUniforms
-  if (paintFlat()) return flatCableCarColor(builder)
-  return Fn(() => {
-    const { rt } = localFrame(builder)
-    const vSunLocal = varying(normalize(rt.mul(u.uSunDir)))
-    const wp = positionWorld.toVar()
-    const N = facingNormal().toVar()
-    const Nl = normalize(normalGeometry).mul(faceDirection).toVar()
-    // 車両の局所（扉の板は区画の真ん中・床が原点。x は車両と同じなので、いつも外の面の扱いになる）
-    const vLocal = positionGeometry.toVar()
-    const info = attribute<'vec4'>('iInfo', 'vec4').toVar()
-    const mat = matAttr().toVar()
-    const id = floor(mat.x.add(0.5)).toVar()
-    const aux = mat.y.toVar()
-    const V = normalize(cameraPosition.sub(wp)).toVar()
-    const dist = length(cameraPosition.sub(wp)).toVar()
-    const vColor = vertexColorAttr().toVar()
-    const albedo = vec3(vColor).toVar()
-    const gloss = float(0.12).toVar()
-    const metal = float(0.0).toVar()
-    const emit = vec3(0.0).toVar()
-    const inside = select(carInside(vLocal), 1.0, 0.0).toVar()
-    const lampOn = info.x.toVar()
-    const an = abs(Nl).toVar()
-    const p = select(an.y.greaterThan(0.7), vLocal.xz, select(an.x.greaterThan(an.z), vLocal.zy, vLocal.xy)).toVar()
-    If(id.lessThan(0.5), () => {
-      // 塗装（つやのある赤とクリーム。下ほど少し汚れる）
-      gloss.assign(aux.mul(0.5).add(0.35))
-      albedo.mulAssign(oNoise(p.mul(3.0).add(info.y.mul(9.0))).mul(0.06).add(0.96))
-      albedo.mulAssign(smoothstep(-0.6, 0.6, vLocal.y.sub(vLocal.z.mul(C.slope))).oneMinus().mul(-0.1).add(1.0))
-    })
-      .ElseIf(id.lessThan(1.5), () => {
-        // 木（ニスを塗った板。aux = 1 なら木目は縦）
-        const wuv = select(aux.greaterThan(0.5), p.yx, p)
-        albedo.mulAssign(woodGrain(wuv))
-        // 腰板の縦の目地
-        If(aux.greaterThan(0.5).and(an.y.lessThan(0.5)), () => {
-          albedo.mulAssign(smoothstep(0.0, 0.012, abs(fract(select(an.x.greaterThan(an.z), vLocal.z, vLocal.x).mul(6.0)).sub(0.5)).mul(0.17)).mul(0.1).add(0.9))
-        })
-        gloss.assign(0.32)
-      })
-      .ElseIf(id.lessThan(2.5), () => {
-        // モケット（細かい織りの目）
-        const weave = p.x.mul(900.0).sin().mul(p.y.mul(900.0).sin()).mul(0.5).add(0.5)
-        albedo.mulAssign(weave.mul(0.22).add(0.8).add(oNoise(p.mul(40.0)).mul(0.12)))
-        gloss.assign(0.02)
-      })
-      .ElseIf(id.lessThan(3.5), () => {
-        metal.assign(1.0)
-        gloss.assign(select(aux.greaterThan(0.5), 0.75, 0.62))
-        albedo.mulAssign(oNoise(vec2(p.x.mul(3.0), p.y.mul(50.0))).mul(0.08).add(0.92))
-      })
-      .ElseIf(id.lessThan(4.5), () => {
-        // 床（幅 11cm の木の板。目地と色のばらつき・人の通る所のすり減り）
-        const row = floor(vLocal.x.div(0.11)).toVar()
-        const seam = smoothstep(0.0, 0.008, abs(fract(vLocal.x.div(0.11)).sub(0.5)).mul(0.11).sub(0.05).add(0.008))
-        albedo.mulAssign(oHash(vec2(row, floor(vLocal.z.div(1.4).add(oHash(vec2(row, 3.0)))))).mul(0.25).add(0.82).mul(woodGrain(vec2(vLocal.x.mul(3.0), vLocal.z))))
-        albedo.mulAssign(seam.mul(0.4).add(0.6))
-        gloss.assign(smoothstep(0.2, 0.8, abs(vLocal.x)).oneMinus().mul(0.15).add(0.22))
-      })
-      .ElseIf(id.lessThan(5.5), () => {
-        albedo.mulAssign(oNoise(p.mul(5.0)).mul(0.04).add(0.96))
-        gloss.assign(0.08)
-      })
-      .ElseIf(id.lessThan(6.5), () => {
-        // 灯り: 中の灯り・前照灯（運転の間）・尾灯
-        albedo.assign(vColor.mul(0.5))
-        If(aux.lessThan(0.5), () => {
-          emit.assign(vColor.mul(lampOn.mul(3.4).add(0.12)))
-        })
-          .ElseIf(aux.lessThan(1.5), () => {
-            emit.assign(vColor.mul(lampOn.mul(2.6).add(0.2)))
-          })
-          .Else(() => {
-            emit.assign(vColor.mul(lampOn.mul(6.0).add(0.4)))
-          })
-        gloss.assign(0.6)
-      })
-      .ElseIf(id.lessThan(7.5), () => {
-        gloss.assign(aux.mul(0.4).add(0.05))
-        albedo.mulAssign(oNoise(p.mul(20.0)).mul(0.1).add(0.9))
-      })
-      .ElseIf(id.lessThan(8.5), () => {
-        gloss.assign(0.12)
-        albedo.mulAssign(oNoise(p.mul(vec2(2.0, 12.0))).mul(0.12).add(0.9))
-      })
-      .ElseIf(id.lessThan(9.5), () => {
-        gloss.assign(0.15)
-      })
-      .Else(() => {
-        // 名前の板: 上半分がさくら号、下半分がかえで号の字（局所の x と、区画の床からの高さで引く）
-        const F = carF(carComp(vLocal.z))
-        const uu = vLocal.x.add(0.42).div(0.84).toVar()
-        If(aux.greaterThan(0.5), () => {
-          uu.assign(uu.oneMinus())
-        })
-        const vv = clamp(vLocal.y.sub(F).sub(0.55).div(0.25), 0.0, 1.0)
-        const tx = cableCarUniforms.uPlate.sample(vec2(clamp(uu, 0.0, 1.0), select(info.y.greaterThan(0.5), 0.0, 0.5).add(vv.mul(0.5))))
-        albedo.assign(mix(vColor, vec3(0.5, 0.06, 0.05), tx.a))
-        gloss.assign(0.4)
-      })
-    const sh = townShadow(wp, N).toVar()
-    const col = vec3(0.0).toVar()
-    If(inside.greaterThan(0.5), () => {
-      // 中: 空の光は窓から（上を向く面ほど少なく、窓に近い面ほど多い）・太陽は窓を通る分だけ・床の照り返し
-      const nearWin = smoothstep(0.1, 1.1, abs(vLocal.x).negate().add(IW)).oneMinus()
-      const ao = select(Nl.y.lessThan(-0.5), 0.22, select(Nl.y.greaterThan(0.5), 0.3, 0.34)).mul(nearWin.mul(0.45).add(0.7))
-      const sun = carSunThrough(vLocal, vSunLocal).mul(max(dot(Nl, vSunLocal), 0.0)).mul(sh)
-      col.assign(albedo.mul(u.uSunLight.mul(sun).add(u.uSkyLight.mul(0.9).add(u.uSunLight.mul(0.05)).mul(ao))))
-    }).Else(() => {
-      col.assign(townLight(albedo.mul(metal.mul(-0.6).add(1.0)), N, 1.0, sh))
-    })
-    const fres = metalFresnel(metal, N, V).toVar()
-    If(inside.lessThan(0.5), () => {
-      col.addAssign(sunSpecular(N, V, gloss, fres, sh))
-    })
-    const R = reflect(V.negate(), N)
-    const env = envRefl(R).toVar()
-    If(inside.greaterThan(0.5), () => {
-      env.assign(mix(vec3(0.5, 0.42, 0.32).mul(u.uSkyLight.mul(0.25).add(vec3(0.06, 0.045, 0.03).mul(lampOn))), env, 0.25))
-    })
-    col.addAssign(env.mul(fres).mul(mix(gloss.mul(0.5), 0.9, metal)).mul(mix(vec3(1.0), albedo.mul(2.0), metal)))
-    // 区画の天井の灯り（車両の局所。自分の区画の灯りと、仕切りのガラス越しのとなりの灯り少し）
-    If(inside.greaterThan(0.5), () => {
-      const ci = carComp(vLocal.z).toVar()
-      const lamp = vec3(0.0, carF(ci).add(C.ceilMid - 0.1), carZc(ci))
-      const Lv = lamp.sub(vLocal).toVar()
-      const d2 = dot(Lv, Lv).toVar()
-      const Ll = Lv.mul(inverseSqrt(max(d2, 1e-4)))
-      const ndl = max(dot(Nl, Ll), 0.0)
-      const LC = vec3(1.0, 0.8, 0.58).mul(1.7)
-      col.addAssign(albedo.mul(LC).mul(lampOn).mul(ndl.mul(0.8).add(0.2)).div(d2.mul(0.9).add(0.45)))
-      // 木の壁と天井の照り返し（暖かい色）
-      col.addAssign(albedo.mul(LC).mul(lampOn).mul(0.09))
-      // 夜の駅の灯り・線路の灯りが窓から入る分（少し）
-      col.addAssign(albedo.mul(townLamps(wp, N)).mul(0.25))
-    }).Else(() => {
-      col.addAssign(albedo.mul(townLamps(wp, N)).mul(0.6))
-      // 窓のまわりの外の面に、中の灯りが少し漏れる
-      col.addAssign(
-        albedo
-          .mul(vec3(1.0, 0.8, 0.58))
-          .mul(lampOn)
-          .mul(0.08)
-          .mul(smoothstep(W - 0.05, W + 0.15, abs(vLocal.x)).oneMinus())
-          .mul(smoothstep(0.0, 0.2, abs(Nl.y)).oneMinus()),
-      )
-    })
-    col.assign(outdoorHaze(col, wp))
-    col.addAssign(emit.mul(exp(dist.negate().div(u.uHazeDist.mul(1.5)))))
-    return col
-  })()
+  return flatCableCarColor(builder)
 }
 
 /** 細かい車両の不透明な面の材質（インスタンス）。door = 扉の板（局所が区画ごとなので、いつも外の面の扱い） */

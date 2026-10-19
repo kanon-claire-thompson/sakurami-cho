@@ -9,9 +9,6 @@ import {
   cameraPosition,
   clamp,
   cos,
-  cross,
-  dFdx,
-  dFdy,
   dot,
   float,
   floor,
@@ -28,7 +25,6 @@ import {
   positionWorld,
   pow,
   select,
-  sign,
   sin,
   smoothstep,
   step,
@@ -39,12 +35,12 @@ import {
   vec4,
 } from 'three/tsl'
 import type { Node } from 'three/webgpu'
-import { oNoise, outdoorHaze, outdoorUniforms, unlit, withUniforms } from '../../materials'
+import { outdoorHaze, outdoorUniforms, unlit, withUniforms } from '../../materials'
 import { townLight } from '../../town/facades'
 import { depthMaterial, townShadow } from '../../town/shadows'
 import type { PlantItem } from './layout'
 import { leafShadow } from '../../town/trees'
-import { markPaint, paintEmit, paintFlat } from '../../paint'
+import { markPaint, paintEmit } from '../../paint'
 
 /**
  * ガーデンドームの新しい形の植物（町の段階 4 の後半）: ヤシ・木生シダ・シダ・オオタニワタリ・アロカシア（大きな葉に葉脈ライティング）・
@@ -545,8 +541,6 @@ export function writePlant(w: PlantWriter, S: ToScene, p: PlantItem, rnd: () => 
 /* シェーダー（TSL。WebGPU への移行の第 2 段）                                         */
 /* -------------------------------------------------------------------------- */
 
-type F = Node<'float'>
-type N3 = Node<'vec3'>
 type V4 = Node<'vec4'>
 
 const PI = 3.14159
@@ -630,19 +624,6 @@ function leafShape(uv: V4) {
   return { a, vein }
 }
 
-/** 高さ h（m）の凹凸で法線を倒す（画面の微分から。接空間の要らないバンプ） */
-function bumpN(N: N3, p: N3, h: F) {
-  const dpx = dFdx(p).toVar()
-  const dpy = dFdy(p).toVar()
-  const dhx = dFdx(h)
-  const dhy = dFdy(h)
-  const r1 = cross(dpy, N).toVar()
-  const r2 = cross(N, dpx)
-  const det = dot(dpx, r1).toVar()
-  const grad = sign(det).mul(r1.mul(dhx).add(r2.mul(dhy)))
-  return select(abs(det).lessThan(1e-12), N, normalize(abs(det).mul(N).sub(grad)))
-}
-
 /** 植物のシェーダー（と、影の深さだけのシェーダー。頂点の計算（風）は positionNode を共有し、葉の形で抜く） */
 export function createPlantMaterials(nightAmb: THREE.Vector3) {
   const uniforms = { uWind: uniform(0.35), uNightAmb: uniform(nightAmb), uVein: uniform(0) }
@@ -670,7 +651,6 @@ export function createPlantMaterials(nightAmb: THREE.Vector3) {
   const vSeed = varying(aWind.w)
 
   const material = markPaint(unlit('domePlants', { side: THREE.DoubleSide, alphaToCoverage: true }), 'light')
-  const flat = paintFlat()
   material.positionNode = positionNode
   material.colorNode = Fn(() => {
     const wp = positionWorld.toVar()
@@ -695,93 +675,32 @@ export function createPlantMaterials(nightAmb: THREE.Vector3) {
     })
     const albedo = vCol.rgb.toVar()
     const ao = vAo.toVar()
-    if (flat) {
-      // 外の塗り（paint.ts）の flat: 葉は付け根と先の 2 段の色・葉脈の形（明るい筋）だけ、幹と苔は平らな色。まだら・凹凸・透ける光・つやは描かない。
-      // 光は木の光の式（'tree'。3 段）、葉脈ライティングは形のくっきりした筋を光る物の色の式（emit）に
-      const veinQ = smoothstep(0.45, 0.55, vein).toVar()
-      // 光る葉脈は細い筋なので、光る所は広めに切る（前は 0.45〜0.55 で切った細い筋に弱い光で、夕方の葉脈ライティングがほとんど見えなかった）
-      const veinG = step(0.22, vein).toVar()
-      If(leafy, () => {
-        // 葉の色を持ち上げる（暗くなるほど強く。前は夕方の中の植物がほぼ黒い塊だった）
-        albedo.mulAssign(mix(1.25, 1.8, u.uNight))
-        albedo.mulAssign(mix(0.82, 1.05, smoothstep(0.45, 0.55, vUv.y)))
-        albedo.assign(mix(albedo, albedo.mul(vec3(1.25, 1.3, 0.95)), veinQ.mul(0.5)))
-        albedo.assign(mix(albedo, albedo.mul(vec3(1.3, 1.25, 1.0)), back.mul(0.6)))
-        If(kind.greaterThan(6.5).and(kind.lessThan(7.5)), () => {
-          albedo.assign(mix(albedo.mul(1.1), vec3(0.9, 0.7, 0.2), veinQ.mul(0.6)))
-        })
-      }).Else(() => {
-        albedo.mulAssign(0.85)
-      })
-      const sh0 = townShadow(wp, N)
-      const col = townLight(albedo, N, ao, select(leafy, leafShadow(sh0), sh0), 'tree').toVar()
-      // 空の光と中の灯りの照り返し（前の塗りの空の光・透ける光の分の代わり。平らに足す。前は省いていたので、夕方の中の植物がほぼ黒い塊だった）
-      col.addAssign(albedo.mul(u.uSkyLight.mul(0.8).add(uniforms.uNightAmb.mul(3.0))).mul(ao))
-      const breath = sin(t.mul(0.55)).mul(0.38).add(0.62)
-      // 流れる光は 2 段（明るい所と、ほのかな所）
-      const flow = step(0.0, sin(vUv.y.mul(9.0).sub(t.mul(1.3)).add(vSeed.mul(20.0)))).mul(0.5).add(0.5)
-      const glow = mix(vec3(0.45, 1.0, 0.3), vec3(0.85, 1.0, 0.45), veinQ)
-      col.addAssign(paintEmit(glow.mul(veinG.mul(1.5).mul(flow).add(0.01)).mul(vCol.a).mul(uniforms.uVein).mul(breath.mul(0.5).add(0.5)).mul(select(leafy, float(1.0), float(0.0)))))
-      return outdoorHaze(col, wp)
-    }
+    // 葉は付け根と先の 2 段の色・葉脈の形（明るい筋）だけ、幹と苔は平らな色。まだら・凹凸・透ける光・つやは描かない。
+    // 光は木の光の式（'tree'。3 段）、葉脈ライティングは形のくっきりした筋を光る物の色の式（emit）に
+    const veinQ = smoothstep(0.45, 0.55, vein).toVar()
+    // 光る葉脈は細い筋なので、光る所は広めに切る（前は 0.45〜0.55 で切った細い筋に弱い光で、夕方の葉脈ライティングがほとんど見えなかった）
+    const veinG = step(0.22, vein).toVar()
     If(leafy, () => {
-      // 葉: 付け根は濃く先は明るい・葉脈は明るい・まだら・縁ほど少し黄色い
-      albedo.mulAssign(vUv.y.mul(0.35).add(0.75))
-      albedo.assign(mix(albedo, albedo.mul(vec3(1.25, 1.3, 0.95)), vein.mul(0.5)))
-      albedo.mulAssign(oNoise(wp.xz.mul(3.0).add(vSeed.mul(9.0))).mul(0.24).add(0.88))
-      albedo.assign(mix(albedo, albedo.mul(vec3(1.15, 1.1, 0.7)), smoothstep(0.6, 1.0, abs(vUv.x)).mul(0.35)))
-      // 葉の裏は白っぽく黄みのある淡い緑（毛と気孔で光を散らす）
-      albedo.assign(mix(albedo, albedo.mul(vec3(1.35, 1.3, 1.05)).add(vec3(0.012, 0.014, 0.008)), back.mul(0.75)))
+      // 葉の色を持ち上げる（暗くなるほど強く。前は夕方の中の植物がほぼ黒い塊だった）
+      albedo.mulAssign(mix(1.25, 1.8, u.uNight))
+      albedo.mulAssign(mix(0.82, 1.05, smoothstep(0.45, 0.55, vUv.y)))
+      albedo.assign(mix(albedo, albedo.mul(vec3(1.25, 1.3, 0.95)), veinQ.mul(0.5)))
+      albedo.assign(mix(albedo, albedo.mul(vec3(1.3, 1.25, 1.0)), back.mul(0.6)))
       If(kind.greaterThan(6.5).and(kind.lessThan(7.5)), () => {
-        albedo.assign(mix(albedo.mul(1.1), vec3(0.9, 0.7, 0.2), vein.mul(0.6)))
+        albedo.assign(mix(albedo.mul(1.1), vec3(0.9, 0.7, 0.2), veinQ.mul(0.6)))
       })
-      If(kind.greaterThan(3.5).and(kind.lessThan(4.5)), () => {
-        // アロカシア: 葉脈の間がふくらむ凹凸（照り返しが脈ごとに並ぶ）・白みの強い葉脈・細かい肌理
-        const au = abs(vUv.x)
-        const d = fract(vUv.y.sub(au.mul(0.42)).mul(7.0)).toVar()
-        const ridge = cos(d.mul(6.2831)).mul(-0.5).add(0.5).toVar()
-        const hh = ridge.mul(0.006).mul(smoothstep(0.04, 0.12, au)).add(oNoise(wp.xz.mul(60.0).add(wp.y.mul(40.0))).sub(0.5).mul(0.0006))
-        N.assign(bumpN(N, wp, hh))
-        albedo.assign(mix(albedo, vec3(0.42, 0.5, 0.36).mul(0.55), vein.mul(0.55)))
-        albedo.mulAssign(ridge.mul(0.2).add(0.9))
-      }).Else(() => {
-        // ほかの葉: 細かい肌理の凹凸（板の平らさを崩す）
-        N.assign(bumpN(N, wp, oNoise(wp.xz.mul(45.0).add(wp.y.mul(30.0))).sub(0.5).mul(0.0015)))
-      })
+    }).Else(() => {
+      albedo.mulAssign(0.85)
     })
-      .ElseIf(kind.greaterThan(8.5), () => {
-        // 幹: ヤシの輪の模様・木生シダの毛の繊維
-        const rings = sin(vUv.y.mul(28.0)).mul(0.5).add(0.5)
-        albedo.mulAssign(rings.mul(0.35).mul(oNoise(vec2(vUv.x.mul(30.0), vUv.y.mul(4.0))).mul(0.2).add(0.8)).add(0.7))
-      })
-      .ElseIf(kind.greaterThan(5.5).and(kind.lessThan(6.5)), () => {
-        // 苔: 細かいふわふわのまだら
-        const n = oNoise(wp.xz.mul(14.0)).mul(0.6).add(oNoise(wp.xz.mul(41.0)).mul(0.4))
-        albedo.mulAssign(n.mul(0.5).add(0.7))
-      })
-    const sh0 = townShadow(wp, N).toVar()
-    const sh = select(leafy, leafShadow(sh0), sh0).toVar()
-    const col = townLight(albedo, N, ao, sh).add(albedo.mul(u.uSkyLight).mul(0.22).mul(ao)).toVar()
-    If(leafy, () => {
-      // 透ける光（段階 5 の植物の仕上げ）: 太陽が葉の向こう側にあるとき、葉を通った黄緑の光。空の明るい側を背にした葉（下から見上げた葉）も、空の光で透ける
-      const thru = albedo.mul(vec3(1.15, 1.3, 0.55)).toVar()
-      const behind = max(dot(N, u.uSunDir).negate(), 0.0)
-      col.addAssign(thru.mul(u.uSunLight).mul(behind.mul(0.55).add(pow(max(dot(V.negate(), u.uSunDir), 0.0), 2.5).mul(0.6))).mul(sh0))
-      col.addAssign(thru.mul(u.uSkyLight).mul(max(N.y.negate(), 0.0)).mul(0.4).mul(ao))
-      // 葉の表のつや（ろうの膜）: 太陽の照り返しと、空の映り込み（浅い角度ほど）
-      const H = normalize(u.uSunDir.add(V))
-      const fres = pow(clamp(dot(N, V).oneMinus(), 0.0, 1.0), 5.0)
-      const gloss = back.oneMinus().mul(select(kind.greaterThan(3.5).and(kind.lessThan(4.5)), float(1.0), float(0.55))).toVar()
-      col.addAssign(u.uSunLight.mul(pow(max(dot(N, H), 0.0), 60.0)).mul(0.22).mul(gloss).mul(sh0))
-      col.addAssign(u.uSkyLight.mul(fres.mul(0.35).add(0.02)).mul(0.35).mul(gloss).mul(ao))
-    })
-    // 夜: 中の灯りの照り返し
-    col.addAssign(albedo.mul(uniforms.uNightAmb).mul(ao.mul(0.4).add(0.6)).mul(1.6))
-    // 葉脈ライティング（金緑色。外のドームと同じ呼吸の明滅）
+    const sh0 = townShadow(wp, N)
+    const col = townLight(albedo, N, ao, select(leafy, leafShadow(sh0), sh0), 'tree').toVar()
+    // 空の光と中の灯りの照り返し（前の塗りの空の光・透ける光の分の代わり。平らに足す。前は省いていたので、夕方の中の植物がほぼ黒い塊だった）
+    col.addAssign(albedo.mul(u.uSkyLight.mul(0.8).add(uniforms.uNightAmb.mul(3.0))).mul(ao))
     const breath = sin(t.mul(0.55)).mul(0.38).add(0.62)
-    const flow = sin(vUv.y.mul(9.0).sub(t.mul(1.3)).add(vSeed.mul(20.0))).mul(0.4).add(0.6)
-    const glow = mix(vec3(0.55, 1.0, 0.32), vec3(0.95, 1.0, 0.5), vein)
-    col.addAssign(glow.mul(vein.mul(0.9).mul(flow).add(0.01)).mul(vCol.a).mul(uniforms.uVein).mul(breath).mul(select(leafy, float(1.0), float(0.0))))
+    // 流れる光は 2 段（明るい所と、ほのかな所）
+    const flow = step(0.0, sin(vUv.y.mul(9.0).sub(t.mul(1.3)).add(vSeed.mul(20.0)))).mul(0.5).add(0.5)
+    const glow = mix(vec3(0.45, 1.0, 0.3), vec3(0.85, 1.0, 0.45), veinQ)
+    col.addAssign(paintEmit(glow.mul(veinG.mul(1.5).mul(flow).add(0.01)).mul(vCol.a).mul(uniforms.uVein).mul(breath.mul(0.5).add(0.5)).mul(select(leafy, float(1.0), float(0.0)))))
     return outdoorHaze(col, wp)
   })()
   const depth = depthMaterial({ positionNode, maskNode: Fn(() => leafShape(vUv).a.greaterThanEqual(0.5))(), side: THREE.DoubleSide })

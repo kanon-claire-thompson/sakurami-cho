@@ -133,7 +133,7 @@ interface Lab {
   placements: readonly Placement[]
   kits: { object: THREE.Group; list: readonly Kit[]; get(id: string): Kit | undefined; update(dt: number, f: Frame): void }
   lighting: { object: THREE.Group; channels: { baseStation: Record<string, number> }; update(dt: number, f: { time: number }): void }
-  shell: { object: THREE.Group; floor: { reflection: boolean } }
+  shell: { object: THREE.Group }
   atmosphere: { object: THREE.Group }
   dispose(): void
 }
@@ -141,7 +141,7 @@ interface CreateLabMod {
   createLab(o: {
     renderer: unknown
     scene: THREE.Scene
-    textures: { shared: Record<string, THREE.Texture>; floor: Record<string, THREE.Texture> }
+    textures: { shared: Record<string, THREE.Texture> }
     quality: 'high' | 'low'
     pixelRatio: number
     placements?: readonly Placement[]
@@ -152,7 +152,6 @@ interface Host {
   channels: Record<string, object | undefined>
   slots: Record<string, (() => { object: THREE.Object3D }) | undefined>
   screens?: Record<string, Draw | undefined>
-  floorReflection?: boolean
 }
 interface PlanMod {
   BASE_STATION_RING_Y: number
@@ -189,9 +188,7 @@ afterAll(() => {
   ;(globalThis as { document?: unknown }).document = realDocument
 })
 
-const sharedTextures = () =>
-  Object.fromEntries(['brushedNormal', 'brushedRough', 'panelNormal', 'panelRough', 'perfOpacity', 'perfNormal', 'smudge'].map((k) => [k, new THREE.Texture()]))
-const floorTextures = () => Object.fromEntries(['map', 'normalMap', 'roughnessMap'].map((k) => [k, new THREE.Texture()]))
+const sharedTextures = () => ({ perfOpacity: new THREE.Texture() })
 // WebGPURenderer の形（異方性の最大は renderer.getMaxAnisotropy()。前の WebGLRenderer は capabilities.getMaxAnisotropy()）
 const fakeRenderer = () => ({ getMaxAnisotropy: () => 8 })
 const frame = (time: number): Frame => ({ time, camera: new THREE.PerspectiveCamera(), renderer: null, scene: new THREE.Scene() })
@@ -206,7 +203,7 @@ async function makeLab(placements?: readonly Placement[], host = emptyHost()) {
   return createLab({
     renderer: fakeRenderer(),
     scene: new THREE.Scene(),
-    textures: { shared: sharedTextures(), floor: floorTextures() },
+    textures: { shared: sharedTextures() },
     quality: 'high',
     pixelRatio: 1,
     placements,
@@ -290,7 +287,7 @@ describe('ラボの什器のキットの口（4-5）', () => {
     await expect(makeLab([{ id: 'x', kit: '無い種類', at: { position: [0, 0, 0], rotationY: 0 } }])).rejects.toThrow('キットの種類が無い')
   })
 
-  test('ラボの光を受ける素材（PBR）には、どれも名前が付いている（使う側が配色の表を名前で引けるように）。床の映り込みはラボの口の floorReflection で止められる', async () => {
+  test('ラボの素材（PBR の形の素材の表）には、どれも名前が付いている（アニメ塗りの配色の表を名前で引くので）', async () => {
     const lab = await makeLab()
     const unnamed = new Set<string>()
     for (const root of [lab.shell.object, lab.kits.object]) {
@@ -303,11 +300,7 @@ describe('ラボの什器のキットの口（4-5）', () => {
       })
     }
     expect([...unnamed]).toEqual([])
-    expect(lab.shell.floor.reflection).toBe(true)
     lab.dispose()
-    const off = await makeLab(undefined, { ...emptyHost(), floorReflection: false })
-    expect(off.shell.floor.reflection).toBe(false)
-    off.dispose()
   })
 
   test('createLab: キットの入力の値と差し込み口の中身はラボの口から。アンカーと障害物は plan のまま', async () => {

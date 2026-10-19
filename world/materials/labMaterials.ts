@@ -1,7 +1,8 @@
 import * as THREE from 'three'
 
 /**
- * ラボ全体で共有する PBR マテリアル。
+ * ラボ全体で共有する素材（MeshStandardMaterial・MeshPhysicalMaterial。色・金属の度合い・透け・名前を持つ「素材の表」で、描くときは
+ * アニメ塗りの素材に差し替える（world/anime/labAnime.ts。名前で役割を引く world/anime/palette.ts の BY_NAME）。法線・ラフネスの質感の写真は持たない）。
  * ゾーンごとに new しないことで、テクスチャとシェーダーを使い回す。
  * `TownRoot`（react/TownView.tsx）がテクスチャを読み込んで作り（town.buildLab）、`useLabMaterials()` で取り出す。
  *
@@ -43,73 +44,42 @@ export interface LabMaterials {
   benchTop: THREE.MeshStandardMaterial
 }
 
+/** ラボのテクスチャ（パンチングメタルの穴の形だけ。アニメ塗りの素材が alphaMap として読む） */
 export interface LabTextures {
-  brushedNormal: THREE.Texture
-  brushedRough: THREE.Texture
-  panelNormal: THREE.Texture
-  panelRough: THREE.Texture
   perfOpacity: THREE.Texture
-  perfNormal: THREE.Texture
-  smudge: THREE.Texture
-}
-
-function repeated(tex: THREE.Texture, x: number, y: number): THREE.Texture {
-  const t = tex.clone()
-  t.wrapS = t.wrapT = THREE.RepeatWrapping
-  t.repeat.set(x, y)
-  t.needsUpdate = true
-  return t
 }
 
 export function createLabMaterials(tex: LabTextures): LabMaterials {
-  const panelRough = repeated(tex.panelRough, 1, 1)
-  const panelNormal = repeated(tex.panelNormal, 1, 1)
-  const brushedRough = repeated(tex.brushedRough, 1, 1)
-  const brushedNormal = repeated(tex.brushedNormal, 1, 1)
-
   return {
     wallPanel: new THREE.MeshStandardMaterial({
       name: 'wallPanel',
       color: '#1b1f26',
       metalness: 0.7,
       roughness: 0.62,
-      roughnessMap: panelRough,
-      normalMap: panelNormal,
-      normalScale: new THREE.Vector2(0.35, 0.35),
     }),
     darkMetal: new THREE.MeshStandardMaterial({
       name: 'darkMetal',
       color: '#262b33',
       metalness: 0.85,
       roughness: 0.5,
-      roughnessMap: panelRough,
-      normalMap: panelNormal,
-      normalScale: new THREE.Vector2(0.25, 0.25),
     }),
     blackMetal: new THREE.MeshStandardMaterial({
       name: 'blackMetal',
       color: '#0e1115',
       metalness: 0.8,
       roughness: 0.55,
-      roughnessMap: brushedRough,
-      normalMap: brushedNormal,
-      normalScale: new THREE.Vector2(0.15, 0.15),
     }),
     steel: new THREE.MeshStandardMaterial({
       name: 'steel',
       color: '#9aa3ad',
       metalness: 1,
       roughness: 0.62,
-      roughnessMap: brushedRough,
-      normalMap: brushedNormal,
-      normalScale: new THREE.Vector2(0.25, 0.25),
     }),
     aluminium: new THREE.MeshStandardMaterial({
       name: 'aluminium',
       color: '#b7bec7',
       metalness: 1,
       roughness: 0.75,
-      roughnessMap: panelRough,
     }),
     chrome: new THREE.MeshStandardMaterial({
       name: 'chrome',
@@ -122,7 +92,6 @@ export function createLabMaterials(tex: LabTextures): LabMaterials {
       color: '#d9dee4',
       metalness: 0.15,
       roughness: 0.48,
-      roughnessMap: panelRough,
     }),
     rubber: new THREE.MeshStandardMaterial({
       name: 'rubber',
@@ -148,7 +117,6 @@ export function createLabMaterials(tex: LabTextures): LabMaterials {
       color: '#0b1218',
       metalness: 0,
       roughness: 0.2,
-      roughnessMap: tex.smudge,
       transparent: true,
       opacity: 0.22,
       depthWrite: false,
@@ -161,7 +129,6 @@ export function createLabMaterials(tex: LabTextures): LabMaterials {
       color: '#5d7f99',
       metalness: 0,
       roughness: 0.25,
-      roughnessMap: tex.smudge,
       transparent: true,
       opacity: 0.28,
       depthWrite: false,
@@ -180,7 +147,6 @@ export function createLabMaterials(tex: LabTextures): LabMaterials {
       roughness: 0.45,
       alphaMap: tex.perfOpacity,
       alphaTest: 0.5,
-      normalMap: tex.perfNormal,
       side: THREE.DoubleSide,
     }),
     pcb: new THREE.MeshStandardMaterial({
@@ -194,27 +160,23 @@ export function createLabMaterials(tex: LabTextures): LabMaterials {
       color: '#15181c',
       metalness: 0.1,
       roughness: 0.42,
-      roughnessMap: panelRough,
     }),
   }
 }
 
 /**
- * 穴の大きさを面ごとに合わせたパンチングメタル（共有の perforated を写し、穴と法線のテクスチャを写して repeat を変える）。
+ * 穴の大きさを面ごとに合わせたパンチングメタル（共有の perforated を写し、穴のテクスチャを写して repeat を変える）。
  * repeatX / repeatY はテクスチャ（穴 約 11 個分）を何回繰り返すか。呼ぶたびに素材を 1 つ作る
  */
 export function perforatedMaterial(mats: LabMaterials, repeatX: number, repeatY: number): THREE.MeshStandardMaterial {
   const m = mats.perforated.clone()
   const alpha = mats.perforated.alphaMap?.clone() ?? null
-  const normal = mats.perforated.normalMap?.clone() ?? null
-  for (const t of [alpha, normal]) {
-    if (!t) continue
-    t.wrapS = t.wrapT = THREE.RepeatWrapping
-    t.repeat.set(repeatX, repeatY)
-    t.needsUpdate = true
+  if (alpha) {
+    alpha.wrapS = alpha.wrapT = THREE.RepeatWrapping
+    alpha.repeat.set(repeatX, repeatY)
+    alpha.needsUpdate = true
   }
   m.alphaMap = alpha
-  m.normalMap = normal
   return m
 }
 

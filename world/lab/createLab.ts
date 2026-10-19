@@ -9,7 +9,7 @@ import { createLabLighting, type LabLighting } from './lighting/createLabLightin
 import { LAB_PLACEMENTS, labKitPlanOf, type LabPlacement } from '../../core/lab/placements'
 import { createLabScreen, type LabScreen } from './screens'
 import { createLabShell, type LabShell } from './shell/createShell'
-import { prepareLabSharedTextures, type LabFloorTextures } from './textures'
+import { prepareLabSharedTextures } from './textures'
 import { mergeStatic, type StaticMerge } from '../staticMerge'
 import { createLabCull, type LabCull } from './labCull'
 
@@ -20,7 +20,7 @@ import { createLabCull, type LabCull } from './labCull'
  * 什器はそのあと。1 本にまとめるのは段 5）。
  *
  * - 置き場所の表（placements）から外した什器は、キット・印の付いた光・光る板・光の筋も作らない。表の順がキットの作る順と毎コマの順
- * - キットの入力の値・差し込み口の中身・画面の中身・床の映り込みを描くか（floorReflection）は、ラボの口（labHost.ts の configureLab）から読む
+ * - キットの入力の値・差し込み口の中身・画面の中身は、ラボの口（labHost.ts の configureLab）から読む
  * - 照明のコアの光は、基地局のキット（置き場所 baseStation）の入力の値を読む（キットは照明のあとに作るので、作ったあとで結び付ける。4-6）
  * - anchors: インスタンスの側のアンカー（作ったキットの物。作った物の行列から出したアンカー（devDesk.monitor）も。4-8）
  * - slots: 差し込み口を名前で引く（作ったキットの「置き場所の id.差し込み口の名前」と照明の lighting.stage。R3F の子を入れる口が使う。4-10）
@@ -35,8 +35,8 @@ export interface LabOptions {
   renderer: WebGPURenderer
   scene: THREE.Scene
   /** 読んだままのテクスチャ（下ごしらえはここでする。textures.ts の labTextureUrls の置き場所から読んだ物） */
-  textures: { shared: LabTextures; floor: LabFloorTextures }
-  /** high なら床に映り込み・影を落とす光・ほこりの数 */
+  textures: { shared: LabTextures }
+  /** high なら影を落とす光・ほこりの数 */
   quality: 'high' | 'low'
   /** 画面の画素の比（ほこりの粒の大きさ。あとから lab.atmosphere.setPixelRatio で変えられる） */
   pixelRatio: number
@@ -107,9 +107,7 @@ export function createLab(o: LabOptions): Lab {
     placements,
     stage: host.slots['lighting.stage']?.() ?? null,
   })
-  const shell = createLabShell({ materials, floor: o.textures.floor, quality })
-  // 床の映り込みを止める設定（ラボの口の floorReflection。既定は描く）
-  if (host.floorReflection === false) shell.floor.setReflection(false)
+  const shell = createLabShell({ materials })
   const screens: LabScreen[] = []
   const kits = createKits(placements, host, { materials, quality, maxAnisotropy: o.renderer.getMaxAnisotropy(), renderer: o.renderer, screens })
   // 画面を貼った物を描いたら、その画面に知らせる（描き直した画面を早めにテクスチャへ送るのは、見えている画面だけ）

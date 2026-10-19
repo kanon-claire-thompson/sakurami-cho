@@ -2,7 +2,7 @@ import * as THREE from 'three/webgpu'
 import type { Outdoor } from '../environment/daylight'
 
 /**
- * アニメ塗りの配色の表（scene/anime/。既定の塗り）。色はどれも「画面に出る sRGB の色」（トーンマッピング・露出のあと。material.ts が ACES の逆に通す）。
+ * ラボのアニメ塗りの配色の表（world/anime/。地図の見た目）。色はどれも「画面に出る sRGB の色」（トーンマッピング・露出のあと。material.ts が ACES の逆に通す）。
  *
  * 1. 役割の下地（ANIME_PALETTE）: 物ごとの塗りの色の元。素材の名前（sakurami-cho のラボの素材と KB-001 の素材。BY_NAME）で役割を引く
  * 2. 時刻の配色（ANIME_TIMES）: 昼・夕方（朝も）・夜・夜中の 4 つ。下地に掛ける色味と明るさ、影の色、光の当たる側の色、光の向き、

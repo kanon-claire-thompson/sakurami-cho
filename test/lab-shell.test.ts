@@ -1,10 +1,10 @@
 /**
  * ラボの殻の three の形（world/lab/shell/*。docs/design/map-split.md §6 の 4-4）の見張り:
- *   - 殻の群の並び（部屋・北の扉・中二階・見学エントランスの太陽の影の群）と、床（high は映り込みの素材、low はふつうの PBR の床）
+ *   - 殻の群の並び（部屋・北の扉・中二階・見学エントランスの太陽の影の群）と、床（名前 labFloor の 1 色の素材。映り込みは無くした）
  *   - attach で太陽の影を落とす物の印が付くのは、窓のある壁と柱・天井の板・見学エントランスの群の中だけ（ガラスと小さな部品は除く）
  *   - 4-0b の直し（中二階の天井の板は部屋の高さ + 2mm・天井のケーブルラックの縁は 1mm 上げる）がそのまま
  *   - 光のにじみは、付けている間だけ部屋の照明に合わせて暗くなる
- *   - 毎コマ: 床の映り込みを描いて（床を隠して撮る）から、見学エントランスの扉を進める（扉は注目点が前に来ると開く）
+ *   - 毎コマ: 見学エントランスの扉を進める（扉は注目点が前に来ると開く。何も描かない）
  *   - 扉の値（sakurami-cho/core/site.ts の DOOR）は間取りのデータ（plan.ts の ENTRANCE_DOOR）と同じ物
  *   - dispose は殻の物を捨て、共有の素材は捨てない
  * Canvas は Bun に無いので、描く物は何もしない Canvas の代わりで作る（絵そのものはアプリの比べる画で見る）。
@@ -32,13 +32,13 @@ interface Frame {
 }
 interface Shell {
   object: THREE.Group
-  floor: { mesh: THREE.Mesh; reflection: boolean; setReflection(on: boolean): void }
+  floor: { mesh: THREE.Mesh }
   attach(): () => void
   update(dt: number, f: Frame): void
   dispose(): void
 }
 interface ShellMod {
-  createLabShell(o: { materials: Mats; floor: Record<string, THREE.Texture>; quality: 'high' | 'low' }): Shell
+  createLabShell(o: { materials: Mats }): Shell
 }
 interface DoorMod {
   entranceDoor: { open: number; lastNear: number }
@@ -97,12 +97,9 @@ afterAll(() => {
   ;(globalThis as { document?: unknown }).document = realDocument
 })
 
-const sharedTextures = () =>
-  Object.fromEntries(['brushedNormal', 'brushedRough', 'panelNormal', 'panelRough', 'perfOpacity', 'perfNormal', 'smudge'].map((k) => [k, new THREE.Texture()]))
-const floorTextures = () => Object.fromEntries(['map', 'normalMap', 'roughnessMap'].map((k) => [k, new THREE.Texture()]))
+const sharedTextures = () => ({ perfOpacity: new THREE.Texture() })
 
-/** 映り込みを撮るのに使う所だけの、何も描かない renderer の代わり（撮った時の様子を書き残す） */
-/** WebGPURenderer の形の偽の renderer（床の映り込み: reflector() の撮る所とぼかしが使う口だけ）。描き先の移り変わりを targets に記録する */
+/** WebGPURenderer の形の偽の renderer（毎コマの更新が何も描かないことを確かめる）。描き先の移り変わりを targets に記録する */
 function fakeRenderer(onRender: (scene: THREE.Object3D, camera: THREE.Camera) => void) {
   return {
     autoClear: true,
@@ -133,12 +130,11 @@ function fakeRenderer(onRender: (scene: THREE.Object3D, camera: THREE.Camera) =>
   }
 }
 
-async function makeShell(quality: 'high' | 'low') {
+async function makeShell() {
   const M = await load<MaterialsMod>('../world/materials/labMaterials.ts')
   const S = await load<ShellMod>(`${LAB}/shell/createShell.ts`)
   const mats = M.createLabMaterials(sharedTextures())
-  const floor = floorTextures()
-  return { mats, floor, shell: S.createLabShell({ materials: mats, floor, quality }) }
+  return { mats, shell: S.createLabShell({ materials: mats }) }
 }
 
 const meshesOf = (o: THREE.Object3D) => {
@@ -150,60 +146,23 @@ const meshesOf = (o: THREE.Object3D) => {
 }
 
 describe('ラボの殻（4-4）', () => {
-  test('殻の群は「部屋・北の扉・中二階・見学エントランス（太陽の影の群の中）」の並び。high の床は映り込みの素材、low はふつうの PBR の床', async () => {
-    const { shell, floor } = await makeShell('high')
+  test('殻の群は「部屋・北の扉・中二階・見学エントランス（太陽の影の群の中）」の並び。床は名前 labFloor の 1 色の素材（質感の写真・映り込みは無い）', async () => {
+    const { shell } = await makeShell()
     expect(shell.object.name).toBe('lab:shell')
     expect(shell.object.children.length).toBe(4)
     const [room, , , entrance] = shell.object.children
     expect(room.children[0]).toBe(shell.floor.mesh)
     expect(entrance.children.length).toBe(1)
-    // 映り込みの素材（WebGPU への移行の第 2 段から、MeshStandardNodeMaterial に TSL の reflector() とぼかしの式を足した物）。値は前の MeshReflectorMaterial と同じ
-    type U = Record<'mirror' | 'mixBlur' | 'mixStrength' | 'mixContrast' | 'minDepthThreshold' | 'maxDepthThreshold' | 'depthScale' | 'depthToBlurRatioBias', { value: number }>
-    const m = shell.floor.mesh.material as THREE.MeshStandardMaterial & { uniforms: U; colorNode: unknown; isNodeMaterial?: boolean }
-    expect(m.name).toBe('labFloorReflector')
-    expect(m.isNodeMaterial).toBe(true)
-    expect(m.colorNode).not.toBeNull()
-    const u = m.uniforms
-    expect([u.mirror.value, u.mixStrength.value, u.mixBlur.value, u.mixContrast.value, m.roughness, m.metalness]).toEqual([0.8, 7, 0.9, 1, 0.62, 0])
-    expect([u.minDepthThreshold.value, u.maxDepthThreshold.value, u.depthScale.value, u.depthToBlurRatioBias.value]).toEqual([0.25, 1.4, 0.8, 0.4])
-    expect(m.map).toBe(floor.map)
-    expect(m.color.getHexString()).toBe(new THREE.Color('#a3abb4').getHexString())
-    // 鏡の面の向きを決める物（reflector() の target）は床の子
-    expect(shell.floor.mesh.children.length).toBe(1)
-    // 床のテクスチャの下ごしらえ（色だけ sRGB）
-    expect([floor.map.colorSpace, floor.normalMap.colorSpace, floor.map.anisotropy]).toEqual([THREE.SRGBColorSpace, THREE.NoColorSpace, 16])
+    const m = shell.floor.mesh.material as THREE.MeshStandardMaterial
+    expect(m.constructor).toBe(THREE.MeshStandardMaterial)
+    expect([m.name, m.roughness, m.metalness, m.map, m.normalMap, m.roughnessMap]).toEqual(['labFloor', 0.55, 0, null, null, null])
+    expect(m.color.getHexString()).toBe(new THREE.Color('#8d949c').getHexString())
+    expect(shell.floor.mesh.children.length).toBe(0)
     expect([shell.floor.mesh.receiveShadow, shell.floor.mesh.rotation.x]).toEqual([true, -Math.PI / 2])
-
-    const low = (await makeShell('low')).shell
-    const lm = low.floor.mesh.material as THREE.MeshStandardMaterial
-    expect(lm.constructor).toBe(THREE.MeshStandardMaterial)
-    expect([lm.roughness, lm.normalScale.x, lm.normalMap !== null]).toEqual([0.55, 0.6, true])
-    let renders = 0
-    low.update(0.016, { time: 0, camera: new THREE.PerspectiveCamera(), renderer: fakeRenderer(() => renders++), scene: new THREE.Scene() })
-    expect(renders).toBe(0)
-    expect(lm.name).toBe('labFloor')
-    expect(low.floor.reflection).toBe(false)
-  })
-
-  test('床の映り込みを止める口（setReflection）: 止めると毎コマ撮らず、床は映り込みの無い PBR の床（labFloor）。戻すと映り込みの素材に戻る', async () => {
-    const { shell } = await makeShell('high')
-    const reflector = shell.floor.mesh.material
-    expect(shell.floor.reflection).toBe(true)
-    shell.floor.setReflection(false)
-    expect(shell.floor.reflection).toBe(false)
-    const plain = shell.floor.mesh.material as THREE.MeshStandardMaterial
-    expect(plain.constructor).toBe(THREE.MeshStandardMaterial)
-    expect([plain.name, plain.roughness]).toEqual(['labFloor', 0.55])
-    let renders = 0
-    shell.update(0.016, { time: 0, camera: new THREE.PerspectiveCamera(), renderer: fakeRenderer(() => renders++), scene: new THREE.Scene() })
-    expect(renders).toBe(0)
-    shell.floor.setReflection(true)
-    expect(shell.floor.mesh.material).toBe(reflector)
-    shell.dispose()
   })
 
   test('attach で太陽の影を落とす物の印が付くのは、窓のある壁と柱・天井の板・見学エントランスだけ（ガラスと小さな部品は除く）', async () => {
-    const { shell } = await makeShell('high')
+    const { shell } = await makeShell()
     const Sun = await load<SunMod>('../world/environment/sunShadow.ts')
     const marked = () => meshesOf(shell.object).filter((x) => x.layers.isEnabled(Sun.SUN_SHADOW_LAYER))
     expect(marked().length).toBe(0)
@@ -232,7 +191,7 @@ describe('ラボの殻（4-4）', () => {
   })
 
   test('4-0b の直しがそのまま: 中二階の天井の板は部屋の高さ + 2mm、天井のケーブルラックの縁は 1mm 上げる', async () => {
-    const { shell } = await makeShell('high')
+    const { shell } = await makeShell()
     const P = await load<PlanMod>(`${LAB_CORE}/plan.ts`)
     const mezz = shell.object.children[2]
     const ceilings = meshesOf(mezz).filter((x): x is THREE.InstancedMesh => (x as THREE.InstancedMesh).isInstancedMesh && (x.material as THREE.MeshStandardMaterial).color.getHexString() === new THREE.Color('#07090c').getHexString())
@@ -252,7 +211,7 @@ describe('ラボの殻（4-4）', () => {
   })
 
   test('光のにじみは、付けている間だけ部屋の照明に合わせて暗くなる', async () => {
-    const { shell } = await makeShell('high')
+    const { shell } = await makeShell()
     const L = await load<LabLightMod>('../world/labLight.ts')
     const W = await load<WashMod>('../world/materials/wallWash.ts')
     const washes = meshesOf(shell.object).filter((x) => (x.material as THREE.MeshBasicMaterial).map?.image && (x.material as THREE.Material).blending === THREE.AdditiveBlending && x.renderOrder === 4)
@@ -267,8 +226,8 @@ describe('ラボの殻（4-4）', () => {
     expect(color.r).toBeCloseTo(W.WASH_COLOR.r * 0.3, 12)
   })
 
-  test('毎コマ: 床を隠して映り込みを撮ってから、見学エントランスの扉を進める（注目点が扉の前なら開く）', async () => {
-    const { shell } = await makeShell('high')
+  test('毎コマ: 見学エントランスの扉を進める（注目点が扉の前なら開く。何も描かない）', async () => {
+    const { shell } = await makeShell()
     const D = await load<DoorMod>(`${LAB}/shell/entranceDoor.ts`)
     const P = await load<PlanMod>(`${LAB_CORE}/plan.ts`)
     const H = await load<TownHostMod>('../world/townHost.ts')
@@ -278,24 +237,18 @@ describe('ラボの殻（4-4）', () => {
     D.entranceDoor.open = 0
     D.entranceDoor.lastNear = -100
 
-    const seen: { floorVisible: boolean; open: number }[] = []
+    let renders = 0
     const scene = new THREE.Scene()
     scene.add(shell.object)
     const camera = new THREE.PerspectiveCamera()
     camera.position.set(0, 1.6, 4)
     camera.lookAt(0, 0.5, 0)
     scene.updateMatrixWorld()
-    const renderer = fakeRenderer((s) => {
-      if (s === scene) seen.push({ floorVisible: shell.floor.mesh.visible, open: D.entranceDoor.open })
-    })
+    const renderer = fakeRenderer(() => renders++)
     shell.update(0.05, { time: 1, camera, renderer, scene })
-    // 場面を 1 回撮る（床を隠して。TSL の reflector() の撮る所）。そのあとぼかしを 5 回描き（描き先は撮る先の外の 3 枚）、最後に撮る先を戻す
-    expect(seen).toEqual([{ floorVisible: false, open: 0 }])
+    expect(renders).toBe(0)
+    expect(renderer.targets.length).toBe(0)
     expect(shell.floor.mesh.visible).toBe(true)
-    expect((shell.floor.mesh.material as THREE.Material).visible).toBe(true)
-    expect(renderer.targets.length).toBe(2 + 5 + 1)
-    expect(renderer.targets.at(-1)).toBeNull()
-    expect(renderer.autoClear).toBe(true)
     expect(D.entranceDoor.open).toBeCloseTo(0.05 / P.ENTRANCE_DOOR.openSeconds, 12)
     // 扉の組（西・東）は外へ逆向きに回る
     const leaves = shell.object.children[3].children[0].children[1].children
@@ -313,7 +266,7 @@ describe('ラボの殻（4-4）', () => {
   })
 
   test('dispose は殻の物（床の素材など）を捨て、共有の素材とガラスは捨てない', async () => {
-    const { shell, mats } = await makeShell('high')
+    const { shell, mats } = await makeShell()
     const disposed = new Set<unknown>()
     const watch = (x: THREE.EventDispatcher<{ dispose: object }>) => x.addEventListener('dispose', () => disposed.add(x))
     watch(mats.blackMetal as never)

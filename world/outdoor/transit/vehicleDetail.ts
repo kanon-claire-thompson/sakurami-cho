@@ -15,14 +15,11 @@ import {
   inverseSqrt,
   length,
   max,
-  mix,
   normalGeometry,
   normalWorldGeometry,
   normalize,
   positionGeometry,
   positionWorld,
-  pow,
-  reflect,
   select,
   sign,
   smoothstep,
@@ -32,13 +29,12 @@ import {
   vec3,
   vec4,
 } from 'three/tsl'
-import { oHash, oNoise, outdoorHaze, outdoorUniforms, skyColor } from '../materials'
+import { oHash, oNoise, outdoorHaze, outdoorUniforms } from '../materials'
 import { GeoBuilder } from '../site/builder'
-import { townLight } from '../town/facades'
 import { townLamps } from '../town/lamps'
 import { townShadow } from '../town/shadows'
-import { ObjectNodeMaterial, envRefl, facingNormal, localFrame, matAttr, metalFresnel, sunSpecular, vertexColorAttr, woodGrain } from './transitMaterial'
-import { markPaint, paintEmit, paintFlat } from '../paint'
+import { ObjectNodeMaterial, facingNormal, localFrame, matAttr, vertexColorAttr } from './transitMaterial'
+import { markPaint, paintEmit } from '../paint'
 import { cabinLight, flatGlass } from '../paintParts'
 
 type Node<T = unknown> = THREE.Node<T>
@@ -193,7 +189,7 @@ function vehicleVaryings(builder: THREE.NodeBuilder) {
 }
 
 /**
- * 外の塗り（paint.ts）の flat のときの不透明な面の色: むら・織りの目・滑り止めの粒・木目・つやの照り返し・映り込みを省き、材質の番号ごとの
+ * 不透明な面の色: むら・織りの目・滑り止めの粒・木目・つやの照り返し・映り込みは描かず、材質の番号ごとの
  * 平らな色を、外は面の光の式・中は中の光の式（窓から入る日なたと空の光・天井の灯り）で塗る。灯り・案内の表示は光る物の色の式（emit）に通す
  */
 function flatDetailColor(builder: THREE.NodeBuilder, v: VehicleTsl) {
@@ -272,179 +268,12 @@ function flatDetailColor(builder: THREE.NodeBuilder, v: VehicleTsl) {
 
 /** 不透明な面の色 */
 function detailColor(builder: THREE.NodeBuilder, v: VehicleTsl) {
-  const u = outdoorUniforms
-  if (paintFlat()) return flatDetailColor(builder, v)
-  return Fn(() => {
-    const { vSunLocal } = vehicleVaryings(builder)
-    const wp = positionWorld.toVar()
-    const N = facingNormal().toVar()
-    const Nl = normalize(normalGeometry).mul(faceDirection).toVar()
-    const vLocal = positionGeometry.toVar()
-    const info = attribute<'vec4'>('iInfo', 'vec4').toVar()
-    const mat = matAttr().toVar()
-    const id = floor(mat.x.add(0.5)).toVar()
-    const aux = mat.y.toVar()
-    const V = normalize(cameraPosition.sub(wp)).toVar()
-    const dist = length(cameraPosition.sub(wp)).toVar()
-    const vColor = vertexColorAttr().toVar()
-    const albedo = vec3(vColor).toVar()
-    const gloss = float(0.12).toVar()
-    const metal = float(0.0).toVar()
-    const emit = vec3(0.0).toVar()
-    const inside = select(v.inside(vLocal), 1.0, 0.0).toVar()
-    const lampOn = info.x.toVar()
-    const an = abs(Nl).toVar()
-    const p = select(an.y.greaterThan(0.7), vLocal.xz, select(an.x.greaterThan(an.z), vLocal.zy, vLocal.xy)).toVar()
-    If(id.lessThan(0.5), () => {
-      gloss.assign(aux.mul(0.5).add(0.3))
-      albedo.mulAssign(oNoise(p.mul(3.0).add(fract(info.w).mul(17.0))).mul(0.06).add(0.96))
-      // 下ほど少し汚れる
-      albedo.mulAssign(smoothstep(0.0, 0.9, vLocal.y).oneMinus().mul(-0.1).add(1.0))
-    })
-      .ElseIf(id.lessThan(1.5), () => {
-        albedo.mulAssign(oNoise(p.mul(4.0)).mul(0.05).add(0.96).add(aux.mul(0.03)))
-        gloss.assign(0.28)
-      })
-      .ElseIf(id.lessThan(2.5), () => {
-        If(aux.lessThan(0.5), () => {
-          // 緑の細かい柄（小さな菱の目と、すこし明るい点）
-          const q = p.mul(38.0).toVar()
-          const dia = abs(fract(q.x.add(q.y.mul(0.5))).sub(0.5)).add(abs(fract(q.y).sub(0.5)))
-          albedo.mulAssign(smoothstep(0.42, 0.5, dia).mul(0.16).add(0.82).add(oNoise(p.mul(60.0)).mul(0.08)))
-        }).Else(() => {
-          const stripe = step(0.5, fract(p.x.mul(7.0)))
-          albedo.mulAssign(mix(0.86, 1.06, stripe).add(oNoise(p.mul(50.0)).mul(0.06)))
-        })
-        gloss.assign(0.02)
-      })
-      .ElseIf(id.lessThan(3.5), () => {
-        metal.assign(1.0)
-        gloss.assign(select(aux.greaterThan(0.5), 0.62, 0.78))
-        albedo.mulAssign(oNoise(vec2(p.x.mul(3.0), p.y.mul(50.0))).mul(0.08).add(0.92))
-      })
-      .ElseIf(id.lessThan(4.5), () => {
-        If(aux.lessThan(0.5), () => {
-          // ゴムの床（丸い粒の滑り止め）
-          const c = fract(vLocal.xz.div(0.045)).sub(0.5)
-          const dot2 = smoothstep(0.12, 0.2, length(c)).oneMinus().toVar()
-          albedo.mulAssign(dot2.mul(0.08).add(0.9).add(oNoise(vLocal.xz.mul(3.0)).mul(0.06)))
-          gloss.assign(dot2.mul(0.08).add(0.1))
-        }).Else(() => {
-          // 木の甲板（幅 9cm の板と目地）
-          const row = floor(vLocal.x.div(0.09)).toVar()
-          const seam = smoothstep(0.0, 0.006, abs(fract(vLocal.x.div(0.09)).sub(0.5)).mul(0.09).sub(0.04).add(0.006))
-          albedo.mulAssign(oHash(vec2(row, floor(vLocal.z.div(1.8).add(oHash(vec2(row, 7.0)))))).mul(0.25).add(0.82).mul(woodGrain(vec2(vLocal.x.mul(3.0), vLocal.z))))
-          albedo.mulAssign(seam.mul(0.38).add(0.62))
-          gloss.assign(0.22)
-        })
-      })
-      .ElseIf(id.lessThan(5.5), () => {
-        albedo.mulAssign(oNoise(p.mul(5.0)).mul(0.04).add(0.96))
-        gloss.assign(0.1)
-      })
-      .ElseIf(id.lessThan(6.5), () => {
-        albedo.assign(vColor.mul(0.5))
-        If(aux.lessThan(0.5), () => {
-          emit.assign(vColor.mul(lampOn.mul(3.0).add(0.15)))
-        })
-          .ElseIf(aux.lessThan(1.5), () => {
-            emit.assign(vColor.mul(lampOn.mul(2.6).add(0.2)))
-          })
-          .ElseIf(aux.lessThan(2.5), () => {
-            emit.assign(vColor.mul(lampOn.mul(6.0).add(0.4)))
-          })
-          .Else(() => {
-            emit.assign(vColor.mul(max(lampOn, u.uDaylight.oneMinus()).mul(3.5).add(0.3)))
-          })
-        gloss.assign(0.6)
-      })
-      .ElseIf(id.lessThan(7.5), () => {
-        gloss.assign(aux.mul(0.4).add(0.05))
-        albedo.mulAssign(oNoise(p.mul(20.0)).mul(0.1).add(0.9))
-      })
-      .ElseIf(id.lessThan(8.5), () => {
-        gloss.assign(0.12)
-        albedo.mulAssign(oNoise(p.mul(vec2(2.0, 12.0))).mul(0.12).add(0.9))
-      })
-      .ElseIf(id.lessThan(9.5), () => {
-        gloss.assign(aux.mul(0.4).add(0.2))
-      })
-      .ElseIf(id.lessThan(10.5), () => {
-        // 案内の表示: 暗い地に橙の点の字（5 × 7 の点の字を並べる。4 秒ごとに表示が替わる（日本語と英語のように））
-        const q = vec2(select(an.x.greaterThan(an.z), vLocal.z, vLocal.x).mul(72.0), vLocal.y.mul(72.0)).toVar()
-        const cell = floor(q).toVar()
-        const cx = floor(cell.x.div(6.0)).toVar()
-        const dx = cell.x.sub(cx.mul(6.0)).toVar()
-        const row = floor(cell.y.div(9.0)).toVar()
-        const dy = cell.y.sub(row.mul(9.0)).toVar()
-        const page = floor(u.uTime.div(4.0).add(aux)).toVar()
-        const glyph = step(0.2, oHash(vec2(cx.add(page.mul(5.0)), row.add(aux.mul(3.0)))))
-        const on = select(dx.lessThan(5.0).and(dy.lessThan(7.0)), step(0.5, oHash(vec2(cx.mul(7.0).add(dx).add(page.mul(31.0)).add(aux.mul(17.0)), row.mul(11.0).add(dy)))).mul(glyph), 0.0)
-        const dot1 = smoothstep(0.28, 0.45, length(fract(q).sub(0.5))).oneMinus()
-        albedo.assign(vec3(0.02))
-        emit.assign(vec3(1.0, 0.45, 0.08).mul(on).mul(dot1).mul(2.2).mul(max(lampOn, 0.6).mul(0.65).add(0.35)))
-        gloss.assign(0.5)
-      })
-      .ElseIf(id.lessThan(11.5), () => {
-        albedo.mulAssign(oNoise(vLocal.xz.mul(9.0)).mul(0.35).add(0.75))
-        gloss.assign(0.05)
-      })
-      .Else(() => {
-        const wuv = select(aux.greaterThan(0.5), p.yx, p)
-        albedo.mulAssign(woodGrain(wuv))
-        gloss.assign(0.32)
-      })
-    const sh = townShadow(wp, N).toVar()
-    const col = vec3(0.0).toVar()
-    If(inside.greaterThan(0.5), () => {
-      const ao = select(Nl.y.lessThan(-0.5), 0.24, select(Nl.y.greaterThan(0.5), 0.32, 0.36))
-      const sun = v.sunThrough(vLocal, vSunLocal).mul(max(dot(Nl, vSunLocal), 0.0)).mul(sh)
-      col.assign(albedo.mul(u.uSunLight.mul(sun).add(u.uSkyLight.mul(0.95).add(u.uSunLight.mul(0.06)).mul(ao))))
-    }).Else(() => {
-      col.assign(townLight(albedo.mul(metal.mul(-0.6).add(1.0)), N, 1.0, sh))
-    })
-    const fres = metalFresnel(metal, N, V).toVar()
-    If(inside.lessThan(0.5), () => {
-      col.addAssign(sunSpecular(N, V, gloss, fres, sh))
-    })
-    const R = reflect(V.negate(), N)
-    const env = envRefl(R).toVar()
-    If(inside.greaterThan(0.5), () => {
-      env.assign(mix(vec3(0.55, 0.5, 0.42).mul(u.uSkyLight.mul(0.25).add(vec3(0.06, 0.05, 0.04).mul(lampOn))), env, 0.3))
-    })
-    col.addAssign(env.mul(fres).mul(mix(gloss.mul(0.5), 0.9, metal)).mul(mix(vec3(1.0), albedo.mul(2.0), metal)))
-    If(inside.greaterThan(0.5), () => {
-      col.addAssign(albedo.mul(v.lamp(vLocal, Nl)).mul(lampOn))
-      // 夜の町の灯り（停留所・街灯）が窓から入る分（少し）
-      col.addAssign(albedo.mul(townLamps(wp, N)).mul(0.25))
-    }).Else(() => {
-      col.addAssign(albedo.mul(townLamps(wp, N)).mul(0.6))
-    })
-    col.assign(outdoorHaze(col, wp))
-    col.addAssign(emit.mul(exp(dist.negate().div(u.uHazeDist.mul(1.5)))))
-    return col
-  })()
+  return flatDetailColor(builder, v)
 }
 
 /** ガラスの色と透け（vec4） */
 export function detailGlassColor(builder: THREE.NodeBuilder, camInside: (c: Node<'vec3'>) => Node<'bool'>, room: THREE.Color) {
-  const u = outdoorUniforms
-  if (paintFlat()) {
-    // 外の塗り（paint.ts）の flat: 透けるガラスの式（映り込み・太陽のきらめきは描かない）
-    return Fn(() => {
-      const { vCamLocal } = vehicleVaryings(builder)
-      const wp = positionWorld.toVar()
-      const info = attribute<'vec4'>('iInfo', 'vec4').toVar()
-      const N = normalize(normalWorldGeometry).toVar()
-      const V = normalize(cameraPosition.sub(wp)).toVar()
-      If(dot(N, V).lessThan(0.0), () => {
-        N.assign(N.negate())
-      })
-      const roomC = vec3(room.r, room.g, room.b).mul(info.x).mul(0.3)
-      const c = flatGlass(N, V, wp, roomC, camInside(vCamLocal)).toVar()
-      return vec4(outdoorHaze(c.rgb, wp), c.a)
-    })()
-  }
+  // 透けるガラスの式（映り込み・太陽のきらめきは描かない）
   return Fn(() => {
     const { vCamLocal } = vehicleVaryings(builder)
     const wp = positionWorld.toVar()
@@ -454,32 +283,9 @@ export function detailGlassColor(builder: THREE.NodeBuilder, camInside: (c: Node
     If(dot(N, V).lessThan(0.0), () => {
       N.assign(N.negate())
     })
-    const cosv = max(dot(N, V), 0.0)
-    const fres = pow(clamp(cosv.oneMinus(), 0.0, 1.0), 5.0).mul(0.96).add(0.04).toVar()
-    const R = reflect(V.negate(), N).toVar()
-    const refl = vec3(0.0).toVar()
-    If(R.y.greaterThan(0.0), () => {
-      refl.assign(skyColor(R))
-    }).Else(() => {
-      refl.assign(mix(skyColor(vec3(R.x, 0.02, R.z)).mul(0.45), u.uSkyLight.mul(0.22), smoothstep(0.0, 0.25, R.y.negate())))
-    })
-    refl.addAssign(u.uSunLight.mul(pow(max(dot(R, u.uSunDir), 0.0), 900.0)).mul(30.0).mul(smoothstep(-0.02, 0.05, u.uSunDir.y)))
-    const camIn = camInside(vCamLocal)
-    const lampOn = info.x.toVar()
-    const roomC = vec3(room.r, room.g, room.b).mul(lampOn).mul(0.3).toVar()
-    const a = clamp(fres.mul(0.85).add(0.06), 0.0, 0.92).toVar()
-    const col = vec3(refl).toVar()
-    If(camIn, () => {
-      // 中から: 夜は中の灯りに照らされた中が映る
-      col.assign(mix(refl, roomC.add(refl.mul(0.4)), clamp(lampOn.mul(0.7).mul(u.uDaylight.oneMinus()), 0.0, 0.7)))
-      a.assign(clamp(a.add(lampOn.mul(0.1).mul(u.uDaylight.oneMinus())), 0.0, 0.92))
-    }).Else(() => {
-      // 外から: 夜は中の灯りが見える（暖かい色が少し）
-      col.addAssign(roomC.mul(0.6).mul(u.uDaylight.oneMinus()))
-    })
-    col.assign(mix(vec3(0.03, 0.035, 0.03), col, 0.92))
-    col.assign(outdoorHaze(col, wp))
-    return vec4(col, a)
+    const roomC = vec3(room.r, room.g, room.b).mul(info.x).mul(0.3)
+    const c = flatGlass(N, V, wp, roomC, camInside(vCamLocal)).toVar()
+    return vec4(outdoorHaze(c.rgb, wp), c.a)
   })()
 }
 

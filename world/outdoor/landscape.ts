@@ -211,7 +211,7 @@ function createTown(anisotropy: number) {
   for (const l of infraParts.stairLights) extraLights.push({ x: l.x, y: l.y, z: l.z, kind: LIGHT_KIND.path, color: '#ffb866', size: 0.2, power: 1.1, seed: l.seed })
   if (lh) extraLights.push({ x: lh.x, y: lh.y, z: lh.focal, kind: LIGHT_KIND.lighthouse, color: '#fff8ea', size: 26, power: 7, seed: 0 })
   // ラボの前のセット（外観・テラス・石段・スロープ・小道・見晴らし台・街灯）
-  const labSite = createLabSite(anisotropy, treeMat)
+  const labSite = createLabSite(treeMat)
   extraLights.push(...labSite.lightItems)
   if (named) extraLights.push(...named.lights)
   // 交通（緑電・ヒノテツ・ケーブルカー・船・浮遊レーン）と線路・架線・停留所・信号・街灯の柱（transit/）
@@ -465,7 +465,7 @@ function updateLandscape(root: THREE.Group, townGroup: THREE.Group, f: TownFrame
   // 町のデータが無い・形が違う: ラボの外観とセットと、その影の地図だけ作る（地形の高さは仮）
   if (!t && !fallbackSite && (townData.status === 'missing' || townData.status === 'outdated' || townData.status === 'error')) {
     createTownTextures(null, gl.getMaxAnisotropy())
-    fallbackSite = createLabSite(gl.getMaxAnisotropy(), null)
+    fallbackSite = createLabSite(null)
     townGroup.add(fallbackSite.group)
     const quality = townQualityConfig()
     fallbackShadows = new TownShadows(quality.shadowSize, quality.shadowNear, quality.shadowFar, quality.shadowNearMax, quality.localShadow)

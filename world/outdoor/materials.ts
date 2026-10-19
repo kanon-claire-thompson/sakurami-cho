@@ -1,7 +1,6 @@
 import * as THREE from 'three/webgpu'
 import {
   Fn,
-  If,
   abs,
   asin,
   atan,
@@ -28,7 +27,6 @@ import {
   positionGeometry,
   positionWorld,
   pow,
-  reflect,
   select,
   sin,
   smoothstep,
@@ -46,9 +44,8 @@ import { outdoor } from '../environment/daylight'
 import { sharedTime } from '../materials/shared'
 import { townLight } from './town/facades'
 import { townShadow } from './town/shadows'
-import { townTextureUniforms } from './town/townTextures'
 import { townLamps } from './town/lamps'
-import { markPaint, outdoorPaint, paintEmit, paintFlat, paintLampLight } from './paint'
+import { markPaint, outdoorPaint, paintEmit, paintLampLight } from './paint'
 
 type Node<T = unknown> = THREE.Node<T>
 
@@ -149,47 +146,16 @@ export const oNoise = Fn(([p]: [Node<'vec2'>]) => {
   return mix(mix(oHash(i), oHash(i.add(vec2(1.0, 0.0))), u.x), mix(oHash(i.add(vec2(0.0, 1.0))), oHash(i.add(vec2(1.0, 1.0))), u.x), u.y)
 })
 
-/** 太陽の直射と空の光（ランバート。下向きの面には地面の照り返し）。外の塗り（paint.ts）の light を入れたら、そちら */
-export const outdoorShade = (albedo: Node<'vec3'>, N: Node<'vec3'>): Node<'vec3'> => {
-  const p = outdoorPaint()
-  return p?.light ? p.light(albedo, N, float(1.0), float(1.0), 'other') : outdoorShadeBase(albedo, N)
-}
+/** 太陽と空の光（外の塗り paint.ts の light。面の種類 other） */
+export const outdoorShade = (albedo: Node<'vec3'>, N: Node<'vec3'>): Node<'vec3'> => outdoorPaint().light(albedo, N, float(1.0), float(1.0), 'other')
 
-/** 前の outdoorShade の式（外の塗りの式から読める） */
-export const outdoorShadeBase = Fn(([albedo, N]: [Node<'vec3'>, Node<'vec3'>]) => {
-  const u = outdoorUniforms
-  const ndl = max(dot(N, u.uSunDir), 0.0)
-  const up = N.y.mul(0.5).add(0.5)
-  const amb = u.uSkyLight.mul(up.mul(0.58).add(0.42)).add(u.uSunLight.mul(up.oneMinus().mul(0.07)))
-  return albedo.mul(u.uSunLight.mul(ndl).add(amb))
-})
+/** 空気遠近（遠いほど地平線の空の色に溶け込む。外の塗り paint.ts の haze）。wp = ワールドの位置 */
+export const outdoorHaze = (col: Node<'vec3'>, wp: Node<'vec3'>): Node<'vec3'> => outdoorPaint().haze(col, wp)
 
-/** 空気遠近（遠いほど地平線の空の色に溶け込む）。wp = ワールドの位置。外の塗り（paint.ts）の haze を入れたら、そちら */
-export const outdoorHaze = (col: Node<'vec3'>, wp: Node<'vec3'>): Node<'vec3'> => {
-  const p = outdoorPaint()
-  return p?.haze ? p.haze(col, wp) : outdoorHazeBase(col, wp)
-}
+/** 空の色（方向 d。外の塗り paint.ts の sky。空の球と、ガラス・水・車体の映り込み） */
+export const skyColor = (d: Node<'vec3'>): Node<'vec3'> => outdoorPaint().sky(d)
 
-/** 前の outdoorHaze の式（外の塗りの式から読める） */
-export const outdoorHazeBase = Fn(([col, wp]: [Node<'vec3'>, Node<'vec3'>]) => {
-  const u = outdoorUniforms
-  const dv = wp.sub(cameraPosition).toVar()
-  const d = length(dv).toVar()
-  const f = exp(d.negate().div(u.uHazeDist)).oneMinus()
-  // 太陽の方を見るほど、かすみは太陽の光を散らして明るく暖かい（前方散乱。逆光の町に奥行きが出る）
-  const dir = dv.div(max(d, 1e-3))
-  const toSun = max(dot(dir, u.uSunDir), 0.0).toVar()
-  const haze = u.uHaze.add(u.uSunLight.mul(pow(toSun, 6.0).mul(0.12).add(pow(toSun, 40.0).mul(0.2))).mul(smoothstep(-0.05, 0.1, u.uSunDir.y)))
-  return mix(col, haze, f)
-})
-
-/** 空の色（方向 d。地平線 → 中ほど → 天頂の 3 段のグラデーションと、太陽の側の地平線の光、夜の町明かり）。外の塗り（paint.ts）の sky を入れたら、そちら */
-export const skyColor = (d: Node<'vec3'>): Node<'vec3'> => {
-  const p = outdoorPaint()
-  return p?.sky ? p.sky(d) : skyColorBase(d)
-}
-
-/** 前の skyColor の式（外の塗りの式から読める） */
+/** 空の色の元（地平線 → 中ほど → 天頂の 3 段のグラデーションと、太陽の側の地平線の光、夜の町明かり。外の塗りの sky がこれを高さの帯で塗り分ける） */
 export const skyColorBase = Fn(([d]: [Node<'vec3'>]) => {
   const u = outdoorUniforms
   const h = max(d.y, 0.0).toVar()
@@ -242,44 +208,13 @@ export const fbm = Fn(([p0]: [Node<'vec2'>]) => {
   return s.div(0.96875)
 })
 
-/** 空のドーム（大きな球の内側）。雲（ノイズ）と太陽の円盤も描く。深度は書かない。外の塗り（paint.ts）の skyDome を入れたら、雲と太陽はそちら */
-export function createSkyMaterial(clouds: boolean) {
-  const u = outdoorUniforms
+/** 空のドーム（大きな球の内側）。空の色と雲・太陽・月は外の塗り（paint.ts の sky・skyDome）。深度は書かない */
+export function createSkyMaterial() {
   const m = markPaint(unlit('outdoorSky', { side: THREE.BackSide, depthWrite: false }), 'sky')
-  const paint = outdoorPaint()
-  if (paint?.skyDome) {
-    const dome = paint.skyDome
-    m.colorNode = Fn(() => {
-      const d = normalize(positionWorld.sub(cameraPosition)).toVar()
-      return dome(d, skyColor(d))
-    })()
-    return m
-  }
+  const dome = outdoorPaint().skyDome
   m.colorNode = Fn(() => {
     const d = normalize(positionWorld.sub(cameraPosition)).toVar()
-    const col = skyColor(d).toVar()
-    const cs = dot(d, u.uSunDir).toVar()
-    // 太陽の円盤とまわりのにじみ（HDR。後処理の bloom でにじむ）
-    const disc = smoothstep(0.99994, 0.99997, cs)
-    const mcs = max(cs, 0.0)
-    const halo = pow(mcs, 900.0).mul(0.06).add(pow(mcs, 90.0).mul(0.012))
-    col.addAssign(u.uSunDisc.mul(disc.add(halo)).mul(smoothstep(-0.02, 0.0, d.y)))
-    if (clouds) {
-      If(d.y.greaterThan(0.0), () => {
-        const p = d.xz.div(d.y.add(0.1)).mul(1.4).add(vec2(u.uTime.mul(0.0035), u.uTime.mul(0.0012))).toVar()
-        const n = fbm(p.mul(1.2))
-        const detail = fbm(p.mul(4.3).add(3.1))
-        const cov = u.uCloudCover
-        const c = smoothstep(cov.oneMinus(), cov.oneMinus().add(0.3), n.mul(0.82).add(detail.mul(0.18))).mul(smoothstep(0.0, 0.12, d.y)).toVar()
-        // 光の当たり方: 太陽の側ほど明るく、縁（薄いところ）は太陽の色で光る（夕方は金に縁取られる）
-        const toward = max(cs, 0.0)
-        const cloud = mix(u.uCloudShade, u.uCloudLit, toward.mul(toward).mul(0.65).add(0.35)).toVar()
-        const rim = smoothstep(0.0, 0.55, c).oneMinus().mul(pow(toward, 5.0))
-        cloud.addAssign(u.uCloudLit.mul(rim).mul(1.4))
-        col.assign(mix(col, cloud, c.mul(0.9)))
-      })
-    }
-    return col
+    return dome(d, skyColor(d))
   })()
   return m
 }
@@ -336,20 +271,8 @@ export function createStructureMaterial() {
     const N = normalize(normalWorld).toVar() // 両面: normalWorld は裏の面で反転済み（MeshBasicNodeMaterial の setupNormal）
     const color = attribute<'vec3'>('color', 'vec3' as const)
     const emit = attribute<'vec4'>('aEmit', 'vec4')
-    // 質感（三方向から投影。煉瓦色は煉瓦、ほかはコンクリート）と、雨の筋・足元の汚れ
+    // 頂点の色の平らな塗り
     const albedo = vec3(color).toVar()
-    // 外の塗り（paint.ts）の flat のときは、質感・雨の筋・汚れを省く（頂点の色の平らな塗り）
-    if (!outdoorPaint()?.flat) {
-      const an = abs(N).toVar()
-      const p = select(an.y.greaterThan(0.7), wp.xz, select(an.x.greaterThan(an.z), wp.zy, wp.xy)).toVar()
-      const brick = step(color.g.mul(1.3), color.r).mul(step(0.12, color.r)).toVar()
-      const isBrick = brick.greaterThan(0.5)
-      const t = townTextureUniforms.uBldAlb.sample(p.div(select(isBrick, 2.0, 3.2))).depth(select(isBrick, 3, 4)).rgb.mul(2.0)
-      const det = pow(max(mix(vec3(1.0), t, 0.8), 0.0), vec3(2.2)).toVar()
-      albedo.assign(color.mul(mix(vec3(dot(det, vec3(0.2126, 0.7152, 0.0722))), det, brick.mul(0.3))))
-      const streak = smoothstep(0.55, 0.85, oNoise(vec2(p.x.mul(1.7), 0.5))).mul(an.y.oneMinus())
-      albedo.mulAssign(float(1.0).sub(streak.mul(0.18)).sub(smoothstep(0.0, 2.0, oNoise(p.mul(0.2)).mul(3.0)).oneMinus().mul(0.1)))
-    }
     const col = townLight(albedo, N, float(1.0), townShadow(wp, N), 'structure').toVar()
     col.addAssign(paintLampLight(albedo, townLamps(wp, N)))
     const k = select(
@@ -372,67 +295,20 @@ export function createStructureMaterial() {
  * 夕方からは葉脈ライティング（金緑色。ゆっくり明滅して「ドームが呼吸している」ように見える）
  */
 export function createDomeMaterial(ribs: number, rings: number) {
-  const u = outdoorUniforms
   const uniforms = { uDome: uniform(0), uRibs: uniform(ribs), uRings: uniform(rings) }
   const m = markPaint(unlit('outdoorDome'), 'light')
-  const paint = outdoorPaint()
-  if (paint && paintFlat()) {
-    m.colorNode = flatDome(uniforms)
-    return withUniforms(m, uniforms)
-  }
-  m.colorNode = Fn(() => {
-    const wp = positionWorld.toVar()
-    const unit = positionGeometry.toVar()
-    const N = normalize(normalWorld).toVar()
-    const V = normalize(cameraPosition.sub(wp)).toVar()
-    const az = atan(unit.z, unit.x).div(6.2831853).mul(uniforms.uRibs).toVar()
-    const el = asin(clamp(unit.y, 0.0, 1.0)).div(1.5707963).mul(uniforms.uRings.add(1.0)).toVar()
-    const fa = abs(fract(az).sub(0.5))
-    const fe = abs(fract(el).sub(0.5))
-    const wa = fwidth(az).mul(1.2).add(0.012)
-    const we = fwidth(el).mul(1.2).add(0.02)
-    const rib = max(smoothstep(float(0.5).sub(wa), 0.5, fa), smoothstep(float(0.5).sub(we), 0.5, fe).mul(step(0.5, el))).toVar()
-    // 主な骨のあいだの細い斜めの格子（ダイヤグリッド）。上ほど目が細かくならないよう、緯度で間隔を広げる
-    const cosEl = sqrt(max(unit.y.mul(unit.y).oneMinus(), 0.04))
-    const g = el.mul(2.4).div(max(cosEl, 0.35))
-    const g1 = az.mul(2.0).add(g).toVar()
-    const g2 = az.mul(2.0).sub(g)
-    const wg = fwidth(g1).mul(0.8).add(0.006)
-    const lattice = max(smoothstep(float(0.5).sub(wg), 0.5, abs(fract(g1).sub(0.5))), smoothstep(float(0.5).sub(wg), 0.5, abs(fract(g2).sub(0.5))))
-    const latticeFade = smoothstep(0.08, 0.25, fwidth(g1)).oneMinus()
-    rib.assign(max(rib, lattice.mul(0.75).mul(latticeFade)))
-    // ガラス: 空を映し、中の木々（濃い緑）が透ける
-    const fres = pow(clamp(dot(N, V).oneMinus(), 0.0, 1.0), 3.0).mul(0.85).add(0.1)
-    const R = reflect(V.negate(), N).toVar()
-    const refl = skyColor(R).mul(vec3(0.92, 0.97, 1.0))
-    const leaves = oNoise(unit.xz.mul(9.0).add(unit.y.mul(3.0))).mul(0.6).add(oNoise(unit.xz.mul(27.0)).mul(0.4)).toVar()
-    const inside = outdoorShade(mix(vec3(0.03, 0.07, 0.03), vec3(0.08, 0.14, 0.05), leaves), vec3(0.0, 1.0, 0.0)).mul(0.8)
-    const col = mix(inside, refl, fres).toVar()
-    // 太陽の照り返し（夕方はガラスが金に光る）
-    const spec = pow(max(dot(R, u.uSunDir), 0.0), 60.0)
-    col.addAssign(u.uSunLight.mul(spec).mul(1.6))
-    // 白い鋼管のリブ
-    const ribCol = outdoorShade(vec3(0.8, 0.8, 0.78), N)
-    col.assign(mix(col, ribCol, rib.mul(0.9)))
-    // 葉脈ライティング（金緑色。ゆっくり呼吸するように明滅し、葉脈のような筋が流れる）
-    const breath = sin(u.uTime.mul(0.55)).mul(0.38).add(0.62).toVar()
-    const veins = smoothstep(0.62, 0.95, oNoise(unit.xz.mul(16.0).add(vec2(u.uTime.mul(0.05), 0.0))).mul(0.7).add(oNoise(unit.xz.mul(48.0)).mul(0.3)))
-    const glow = vec3(0.55, 1.0, 0.32).mul(leaves.mul(0.65).add(0.35)).mul(breath).add(vec3(0.9, 1.0, 0.45).mul(veins).mul(breath).mul(1.2))
-    col.addAssign(glow.mul(uniforms.uDome).mul(rib.mul(-0.7).add(1.0)).mul(1.6))
-    col.addAssign(vec3(0.7, 0.9, 0.5).mul(rib).mul(uniforms.uDome).mul(0.25).mul(breath))
-    return outdoorHaze(col, wp)
-  })()
+  m.colorNode = flatDome(uniforms)
   return withUniforms(m, uniforms)
 }
 
 /**
- * 外の塗りの flat のときのガーデンドーム: 骨は面の光の式（'dome'）、ガラスは外の塗りの透けるガラス（無ければ空の映り）を中の木々の
- * 2 段の緑の上に、葉脈ライティングは形のはっきりした筋（2 段）を光る物の色の式（emit）に通す。ガラスの細かい葉のまだら・太陽の照り返しは描かない
+ * ガーデンドームの式: 骨は面の光の式（'dome'）、ガラスは外の塗りの透けるガラスを中の木々の 2 段の緑の上に、葉脈ライティングは形のはっきりした筋（2 段）を
+ * 光る物の色の式（emit）に通す。ガラスの細かい葉のまだら・太陽の照り返しは描かない
  */
 function flatDome(uniforms: { uDome: Node<'float'>; uRibs: Node<'float'>; uRings: Node<'float'> }) {
   const u = outdoorUniforms
-  const paint = outdoorPaint()!
-  const shade = (a: Node<'vec3'>, N: Node<'vec3'>) => (paint.light ? paint.light(a, N, float(1.0), float(1.0), 'dome') : outdoorShade(a, N))
+  const paint = outdoorPaint()
+  const shade = (a: Node<'vec3'>, N: Node<'vec3'>) => paint.light(a, N, float(1.0), float(1.0), 'dome')
   return Fn(() => {
     const wp = positionWorld.toVar()
     const unit = positionGeometry.toVar()
@@ -457,14 +333,8 @@ function flatDome(uniforms: { uDome: Node<'float'>; uRibs: Node<'float'>; uRings
     const leaves = smoothstep(0.48, 0.52, oNoise(unit.xz.mul(5.0).add(unit.y.mul(2.0)))).toVar()
     const inside = shade(mix(vec3(0.03, 0.07, 0.03), vec3(0.08, 0.14, 0.05), leaves), vec3(0.0, 1.0, 0.0)).mul(0.8).toVar()
     const col = vec3(inside).toVar()
-    if (paint.glass) {
-      const gl = paint.glass(N, V, wp, vec3(0.0)).toVar()
-      col.assign(mix(inside, gl.rgb, gl.a))
-    } else {
-      const R = reflect(V.negate(), N)
-      const fres = smoothstep(0.55, 0.6, dot(N, V).oneMinus()).mul(0.5).add(0.15)
-      col.assign(mix(inside, skyColor(R).mul(vec3(0.92, 0.97, 1.0)), fres))
-    }
+    const gl = paint.glass(N, V, wp, vec3(0.0)).toVar()
+    col.assign(mix(inside, gl.rgb, gl.a))
     col.assign(mix(col, shade(vec3(0.8, 0.8, 0.78), N), rib.mul(0.9)))
     // 葉脈ライティング（金緑色。ゆっくり呼吸するように明滅。筋は形のはっきりした 2 段）
     const breath = sin(u.uTime.mul(0.55)).mul(0.38).add(0.62).toVar()
@@ -550,15 +420,9 @@ export function createLightsMaterial(a: LightAttributes) {
   const vCoreR = varying(core.div(sprite))
   const c = uv().mul(2.0).sub(1.0)
   const r = length(c).toVar()
-  // 芯（後処理の bloom でにじむ明るさ）と、まわりのほのかなにじみ（外の塗り（paint.ts）の glow を入れたら、そちら）
-  const glow = outdoorPaint()?.glow
-  if (glow) {
-    m.colorNode = vec4(vCol.mul(glow(r, vCoreR)).mul(step(r, 1.0)), 1.0)
-  } else {
-    const coreI = smoothstep(vCoreR.mul(0.45), vCoreR, r).oneMinus()
-    const halo = exp(r.mul(r).mul(-5.0)).mul(0.28)
-    m.colorNode = vec4(vCol.mul(coreI.mul(2.2).add(halo)).mul(step(r, 1.0)), 1.0)
-  }
+  // 芯（後処理の bloom でにじむ明るさ）と輪の形（外の塗り paint.ts の glow）
+  const glow = outdoorPaint().glow
+  m.colorNode = vec4(vCol.mul(glow(r, vCoreR)).mul(step(r, 1.0)), 1.0)
   return withUniforms(m, uniforms)
 }
 
@@ -580,7 +444,6 @@ export function createLightsSprite(g: THREE.BufferGeometry) {
 export function createBeamMaterial() {
   const uniforms = { uBeam: uniform(0) }
   const m = markPaint(unlit('outdoorBeam', { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }), 'glow')
-  const flat = paintFlat()
   // 法線は頂点で世界の向きにして、正規化しないまま補間する（細い帯の縁の画素では補間した法線が 0 の長さになることがあり、正規化すると NaN）
   const vNormal = varying(modelWorldMatrix.mul(vec4(normalLocal, 0.0)).xyz)
   m.colorNode = Fn(() => {
@@ -596,13 +459,10 @@ export function createBeamMaterial() {
     // カメラの近く（ラボのまわり）を通る帯の殻は描かない。帯がラボの方へ回ってくるとき、近くの殻が町の上に大きな灰色の膜になって
     // 見えるため（ラボの方を向く前後は帯ごと消す。landscape.ts）
     const nearFade = smoothstep(400.0, 2500.0, d)
-    if (flat) {
-      // 外の塗りの flat: 帯の明るさを 2 段の平らな光に（芯と外側。縁はくっきり）
-      const q = thick.mul(fall).toVar()
-      const level = smoothstep(0.12, 0.14, q).mul(0.45).add(smoothstep(0.42, 0.45, q).mul(0.55))
-      return paintEmit(vec3(0.85, 0.9, 1.0).mul(level).mul(haze).mul(nearFade).mul(uniforms.uBeam).mul(0.3))
-    }
-    return vec3(0.85, 0.9, 1.0).mul(thick).mul(fall).mul(haze).mul(nearFade).mul(uniforms.uBeam).mul(0.22)
+    // 帯の明るさを 2 段の平らな光に（芯と外側。縁はくっきり）
+    const q = thick.mul(fall).toVar()
+    const level = smoothstep(0.12, 0.14, q).mul(0.45).add(smoothstep(0.42, 0.45, q).mul(0.55))
+    return paintEmit(vec3(0.85, 0.9, 1.0).mul(level).mul(haze).mul(nearFade).mul(uniforms.uBeam).mul(0.3))
   })()
   return withUniforms(m, uniforms)
 }

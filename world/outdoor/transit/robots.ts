@@ -5,7 +5,6 @@ import {
   attribute,
   cameraPosition,
   clamp,
-  dot,
   exp,
   float,
   floor,
@@ -17,8 +16,6 @@ import {
   normalize,
   positionGeometry,
   positionWorld,
-  pow,
-  reflect,
   select,
   texture,
   uniform,
@@ -31,12 +28,12 @@ import { CABLE_STATIONS, stationHeading, stationScene, type CableStationZone } f
 import { SITE } from '../../../core/town'
 import { townEvents, townFocus } from '../../townHost'
 import { interiors } from '../interior/interiors'
-import { oNoise, outdoorHaze, outdoorUniforms, skyColor, unlit, withUniforms } from '../materials'
+import { outdoorHaze, outdoorUniforms, unlit, withUniforms } from '../materials'
 import { GeoBuilder } from '../site/builder'
 import { townLight } from '../town/facades'
 import { townLamps } from '../town/lamps'
 import { townShadow } from '../town/shadows'
-import { markPaint, outdoorPaint, paintEmit, paintFlat } from '../paint'
+import { markPaint, outdoorPaint, paintEmit } from '../paint'
 import { boatNet } from './boats'
 import { cableTrack } from './cable'
 import { CABLE_RUN, CABLE_TRIPS, cableTrip, tripStart } from '../../../core/transit/cableRun'
@@ -282,7 +279,6 @@ function createRobotMaterial(plate: THREE.Texture | null, rows: number) {
   }
   const m = markPaint(unlit('stationRobot'), 'light')
   const paint = outdoorPaint()
-  const flat = paintFlat()
   const vColor = attribute<'vec3'>('color', 'vec3')
   const vMat = attribute<'vec2'>('aMat', 'vec2')
   const vInfo = attribute<'vec4'>('iInfo', 'vec4')
@@ -294,14 +290,13 @@ function createRobotMaterial(plate: THREE.Texture | null, rows: number) {
     const N = normalize(normalWorld).toVar() // 両面: normalWorld は裏の面で反転済み（MeshBasicNodeMaterial の setupNormal）
     const id = floor(vMat.x.add(0.5)).toVar()
     const aux = vMat.y.toVar()
-    const V = normalize(cameraPosition.sub(wp)).toVar()
     const dist = length(cameraPosition.sub(wp)).toVar()
     const albedo = vec3(vColor).toVar()
     const gloss = aux.mul(0.4).add(0.3).toVar()
     const metal = float(0.0).toVar()
     const emit = vec3(0.0).toVar()
     If(id.lessThan(0.5), () => {
-      if (!flat) albedo.mulAssign(oNoise(vLocal.xy.mul(30.0)).mul(0.05).add(0.96))
+      // 塗装（平らな色のまま）
     })
       .ElseIf(id.lessThan(1.5), () => {
         gloss.assign(aux.mul(0.4).add(0.08))
@@ -333,43 +328,15 @@ function createRobotMaterial(plate: THREE.Texture | null, rows: number) {
         gloss.assign(0.5)
       })
     const room = vInfo.z.toVar()
-    if (flat) {
-      // 外の塗り（paint.ts）の flat: 外は面の光の式、建物の中は中の光の式（灯りの色と上からの向き）。照り返し・映り込みは省く
-      const sh0 = townShadow(wp, N)
-      const a = albedo.mul(metal.mul(-0.6).add(1.0))
-      const outC = townLight(a, N, float(1.0), sh0, 'vehicle')
-      const inC = paint?.interior ? paint.interior(a, vRoom.mul(max(N.y, 0.0).mul(0.9).add(1.1)), vRoom, N, float(1.0)) : a.mul(vRoom)
-      const c = mix(outC, inC, room).add(albedo.mul(townLamps(wp, N)).mul(0.7)).toVar()
-      c.assign(outdoorHaze(c, wp))
-      c.addAssign(paintEmit(emit).mul(exp(dist.negate().div(u.uHazeDist.mul(1.5)))))
-      return c
-    }
-    const sh = townShadow(wp, N).toVar()
-    const col = townLight(albedo.mul(metal.mul(-0.6).add(1.0)), N, float(1.0), mix(sh, 1.0, room.mul(0.5))).mul(room.mul(-0.75).add(1.0)).toVar()
-    // 建物の中の光（まわりの明るさと灯りの色。上からの向き）
-    col.addAssign(albedo.mul(vRoom).mul(max(N.y, 0.0).mul(0.45).add(0.55)).mul(room))
-    const H = normalize(V.add(u.uSunDir))
-    const pw = mix(10.0, 260.0, gloss).toVar()
-    const f0 = mix(0.04, 0.9, metal).toVar()
-    const fres = f0.add(f0.oneMinus().mul(pow(clamp(dot(N, V).oneMinus(), 0.0, 1.0), 5.0))).toVar()
-    col.addAssign(
-      u.uSunLight
-        .mul(pow(max(dot(N, H), 0.0), pw))
-        .mul(pw.add(2.0).div(8.0))
-        .mul(fres)
-        .mul(sh)
-        .mul(max(dot(N, u.uSunDir), 0.0))
-        .mul(gloss)
-        .mul(room.mul(-0.8).add(1.0)),
-    )
-    const R = reflect(V.negate(), N).toVar()
-    const env = select(R.y.greaterThan(0.0), skyColor(R), u.uSkyLight.mul(0.3)).toVar()
-    env.assign(mix(env, vRoom.mul(0.8), room))
-    col.addAssign(env.mul(fres).mul(mix(gloss.mul(0.4), 0.85, metal)).mul(mix(vec3(1.0), albedo.mul(2.0), metal)))
-    col.addAssign(albedo.mul(townLamps(wp, N)).mul(0.7))
-    col.assign(outdoorHaze(col, wp))
-    col.addAssign(emit.mul(exp(dist.negate().div(u.uHazeDist.mul(1.5)))))
-    return col
+    // 外は面の光の式、建物の中は中の光の式（灯りの色と上からの向き）。照り返し・映り込みは省く
+    const sh0 = townShadow(wp, N)
+    const a = albedo.mul(metal.mul(-0.6).add(1.0))
+    const outC = townLight(a, N, float(1.0), sh0, 'vehicle')
+    const inC = paint.interior(a, vRoom.mul(max(N.y, 0.0).mul(0.9).add(1.1)), vRoom, N, float(1.0))
+    const c = mix(outC, inC, room).add(albedo.mul(townLamps(wp, N)).mul(0.7)).toVar()
+    c.assign(outdoorHaze(c, wp))
+    c.addAssign(paintEmit(emit).mul(exp(dist.negate().div(u.uHazeDist.mul(1.5)))))
+    return c
   })()
   return withUniforms(m, uniforms)
 }

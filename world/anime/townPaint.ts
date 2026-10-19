@@ -10,8 +10,8 @@ type F = Node<'float'>
 type V3 = Node<'vec3'>
 
 /**
- * 町のアニメ塗り（scene/anime/。既定の塗り。?paint=real で前の見た目）: 地図（sakurami-cho）の外の塗りの口（world/outdoor/paint.ts の OutdoorPaint）に入れる式と、
- * 町の時刻の配色の表（TOWN_TIMES）。src/townBinding.ts が町の材質を作る前に入れ、LabAnime.tsx が毎コマ時刻の配色を書く（updateTownPaint）。
+ * 町のアニメ塗り（地図の見た目）: 外の塗り（world/outdoor/paint.ts の OutdoorPaint）の式 TOWN_PAINT と、町の時刻の配色の表（TOWN_TIMES）。
+ * 町の材質を組み立てるときに outdoorPaint() が返し、labAnime.ts が毎コマ時刻の配色を書く（updateTownPaint）。
  *
  * ラボの塗り（material.ts）は「画面の色」で書くが、町は前と同じく太陽・空の光（地図の outdoorUniforms。時刻で連続に変わる）を元にした HDR の色のまま
  * （外へ出たときの自動露出・ラボの窓からの明るさの釣り合いが前と同じになるように）、それを次のように描き替える:
@@ -642,11 +642,10 @@ export const TOWN_PAINT: OutdoorPaint = {
   glass,
   fall,
   particle,
-  flat: true,
 }
 
 /* -------------------------------------------------------------------------- */
-/* ラボの外の KB-001 の配色（LabAnime.tsx が毎コマ読む）                              */
+/* 町の光を CPU で（人・連れ歩く物の塗りを町に合わせる。kanon-stream-video の KB-001）    */
 /* -------------------------------------------------------------------------- */
 
 const ACES_IN = new THREE.Matrix3().set(0.59719, 0.35458, 0.04823, 0.076, 0.90834, 0.01566, 0.0284, 0.13383, 0.83777)

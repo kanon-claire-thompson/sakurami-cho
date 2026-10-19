@@ -232,7 +232,7 @@ const PUBLIC_API: Record<'core' | 'world' | 'character', readonly string[]> = {
   ],
   world: [
     ...['createTown', 'Town', 'TownCreateOptions', 'TownClock', 'TownEventMap', 'TownFocus', 'TownFrame', 'TownStatus'],
-    ...['PALETTE', 'FONTS', 'configureLab', 'configureOutdoorPaint', 'OutdoorPaint', 'PaintSurface', 'createFollowCamera', 'FollowCamera', 'FollowCameraOptions', 'FollowTarget'],
+    ...['PALETTE', 'FONTS', 'configureLab', 'createFollowCamera', 'FollowCamera', 'FollowCameraOptions', 'FollowTarget'],
   ],
   character: [
     ...['createCharacter', 'CharacterOptions', 'CharacterSpawnPoint', 'Character', 'CharacterDriver'],

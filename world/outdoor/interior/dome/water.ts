@@ -3,7 +3,6 @@ import {
   Discard,
   Fn,
   If,
-  abs,
   attribute,
   cameraPosition,
   clamp,
@@ -18,8 +17,6 @@ import {
   modelViewMatrix,
   normalize,
   positionWorld,
-  pow,
-  reflect,
   screenDPR,
   select,
   sin,
@@ -32,9 +29,8 @@ import {
   vec3,
   vec4,
 } from 'three/tsl'
-import { oNoise, outdoorHaze, outdoorUniforms, skyColor, unlit, withUniforms } from '../../materials'
-import { townShadow } from '../../town/shadows'
-import { markPaint, outdoorPaint, paintEmit, paintFlat } from '../../paint'
+import { oNoise, outdoorHaze, outdoorUniforms, unlit, withUniforms } from '../../materials'
+import { markPaint, outdoorPaint, paintEmit } from '../../paint'
 
 /**
  * ガーデンドームの水（池の水面・大滝「天の水」と回廊から落ちる細い滝・滝つぼのしぶき）と、雲霧林の霧（噴霧装置）。
@@ -53,62 +49,24 @@ export function createPoolMaterial() {
   const u = outdoorUniforms
   const vUv = varying(attribute<'vec2'>('aUv', 'vec2'))
   const m = markPaint(unlit('domePool'), 'water')
-  const water = paintFlat() ? outdoorPaint()?.water : undefined
-  if (water) {
-    // 外の塗り（paint.ts）の flat: 水面は塗りの水の式（川・池の色。夜の中の灯りと葉脈の光の映りは灯りの映りとして渡す）、泡は形のくっきりした白
-    m.colorNode = Fn(() => {
-      const wp = positionWorld.toVar()
-      const p = wp.xz.toVar()
-      const t = u.uTime
-      const V = normalize(cameraPosition.sub(wp)).toVar()
-      const breath = sin(t.mul(0.55)).mul(0.38).add(0.62)
-      const lamps = uniforms.uNightAmb.mul(0.6).add(paintEmit(vec3(0.55, 1.0, 0.32).mul(uniforms.uVein).mul(breath).mul(0.12)))
-      const col = water(vec3(0.0, 1.0, 0.0), V, wp, false, lamps).toVar()
-      // 池の形: 浅い縁（輪の内と外）の明るい水の帯と、葉脈の光の緑の映り（平らな色。灯りの映りの段に届かない弱い光は、塗りの水の式では消えて池が見えなかった）
-      const shallow = vUv.y
-      const rim = step(0.8, shallow)
-      col.assign(mix(col, col.mul(1.5).add(u.uSkyLight.mul(0.12)).add(uniforms.uNightAmb.mul(0.8)), rim))
-      col.addAssign(paintEmit(vec3(0.45, 1.0, 0.35).mul(uniforms.uVein).mul(breath.mul(0.5).add(0.5)).mul(mix(0.1, 0.22, step(0.45, shallow)))))
-      const df = length(p.sub(uniforms.uFoam.xy))
-      const foamK = smoothstep(uniforms.uFoam.w.mul(0.3), uniforms.uFoam.w.mul(1.6), df).oneMinus()
-      const foam = step(0.62, oNoise(p.mul(3.0).add(vec2(t.mul(0.9), t.mul(-0.7)))).mul(0.7).add(foamK.mul(0.4))).mul(foamK)
-      col.assign(mix(col, vec3(0.75, 0.8, 0.8).mul(u.uSkyLight.mul(1.2).add(u.uSunLight.mul(0.35)).add(uniforms.uNightAmb.mul(2.0)).add(0.02)), foam.mul(0.85)))
-      return outdoorHaze(col, wp)
-    })()
-    return withUniforms(m, uniforms)
-  }
+  const water = outdoorPaint().water
+  // 水面は外の塗り（paint.ts）の水の式（川・池の色。夜の中の灯りと葉脈の光の映りは灯りの映りとして渡す）、泡は形のくっきりした白
   m.colorNode = Fn(() => {
     const wp = positionWorld.toVar()
     const p = wp.xz.toVar()
     const t = u.uTime
-    // さざ波の法線（2 方向の流れ）
-    const q = p.mul(1.7).add(vec2(t.mul(0.35), t.mul(0.2))).toVar()
-    const n0 = oNoise(q).toVar()
-    const g = vec2(n0.sub(oNoise(q.add(vec2(0.37, 0.0)))), n0.sub(oNoise(q.add(vec2(0.0, 0.37))))).toVar()
-    g.addAssign(vec2(oNoise(p.mul(4.3).sub(vec2(t.mul(0.6), t.mul(-0.4)))).sub(0.5), oNoise(p.mul(4.3).add(vec2(t.mul(0.5), t.mul(0.7))).add(3.1)).sub(0.5)).mul(0.5))
-    // 滝の落ちる所（uFoam: x, z = 中心、w = 半径）のまわりは波立つ
-    const df = length(p.sub(uniforms.uFoam.xy))
-    const foamK = smoothstep(uniforms.uFoam.w.mul(0.3), uniforms.uFoam.w.mul(1.6), df).oneMinus().toVar()
-    g.mulAssign(foamK.mul(1.6).add(0.35))
-    const N = normalize(vec3(g.x.mul(-0.5), 1.0, g.y.mul(-0.5))).toVar()
     const V = normalize(cameraPosition.sub(wp)).toVar()
-    const ndv = max(dot(N, V), 0.0)
-    const fres = pow(clamp(ndv.oneMinus(), 0.0, 1.0), 5.0).mul(0.98).add(0.02).toVar()
-    const R = reflect(V.negate(), N).toVar()
-    // 映り込み: 上の空と、ドームの中の木々（水平に近いほど濃い緑）
-    const sky = skyColor(vec3(R.x, max(R.y, 0.02), R.z))
-    const green = vec3(0.025, 0.05, 0.025).mul(u.uDaylight.add(0.6)).add(uniforms.uNightAmb.mul(0.4))
-    const refl = mix(green, sky.mul(0.85), smoothstep(0.15, 0.7, R.y))
-    const sun = pow(max(dot(R, u.uSunDir), 0.0), 400.0).mul(18.0).mul(townShadow(wp.add(vec3(0.0, 0.2, 0.0)), vec3(0.0, 1.0, 0.0)))
-    // 深さの色（底の石が透ける・縁は浅い）
-    const shallow = vUv.y
-    const deep = mix(vec3(0.012, 0.03, 0.03), vec3(0.04, 0.075, 0.06), shallow).mul(u.uSkyLight.mul(2.0).add(uniforms.uNightAmb.mul(2.0)).add(0.02))
-    const col = mix(deep, refl, fres).add(u.uSunLight.mul(sun)).toVar()
-    // 葉脈の光の映り込み（夕方から）
     const breath = sin(t.mul(0.55)).mul(0.38).add(0.62)
-    col.addAssign(vec3(0.55, 1.0, 0.32).mul(uniforms.uVein).mul(breath).mul(0.06).mul(oNoise(p.mul(0.8).add(vec2(0.0, t.mul(0.1)))).mul(0.5).add(0.5)).mul(fres).mul(4.0))
-    // 白い泡
-    const foam = foamK.mul(smoothstep(0.35, 0.75, oNoise(p.mul(3.0).add(vec2(t.mul(0.9), t.mul(-0.7)))).mul(0.6).add(oNoise(p.mul(9.0).sub(t.mul(1.3))).mul(0.4)).add(foamK.mul(0.3))))
+    const lamps = uniforms.uNightAmb.mul(0.6).add(paintEmit(vec3(0.55, 1.0, 0.32).mul(uniforms.uVein).mul(breath).mul(0.12)))
+    const col = water(vec3(0.0, 1.0, 0.0), V, wp, false, lamps).toVar()
+    // 池の形: 浅い縁（輪の内と外）の明るい水の帯と、葉脈の光の緑の映り（平らな色。灯りの映りの段に届かない弱い光は、塗りの水の式では消えて池が見えなかった）
+    const shallow = vUv.y
+    const rim = step(0.8, shallow)
+    col.assign(mix(col, col.mul(1.5).add(u.uSkyLight.mul(0.12)).add(uniforms.uNightAmb.mul(0.8)), rim))
+    col.addAssign(paintEmit(vec3(0.45, 1.0, 0.35).mul(uniforms.uVein).mul(breath.mul(0.5).add(0.5)).mul(mix(0.1, 0.22, step(0.45, shallow)))))
+    const df = length(p.sub(uniforms.uFoam.xy))
+    const foamK = smoothstep(uniforms.uFoam.w.mul(0.3), uniforms.uFoam.w.mul(1.6), df).oneMinus()
+    const foam = step(0.62, oNoise(p.mul(3.0).add(vec2(t.mul(0.9), t.mul(-0.7)))).mul(0.7).add(foamK.mul(0.4))).mul(foamK)
     col.assign(mix(col, vec3(0.75, 0.8, 0.8).mul(u.uSkyLight.mul(1.2).add(u.uSunLight.mul(0.35)).add(uniforms.uNightAmb.mul(2.0)).add(0.02)), foam.mul(0.85)))
     return outdoorHaze(col, wp)
   })()
@@ -155,41 +113,18 @@ export function createFallMaterial() {
   const o = outdoorUniforms
   const vUv = varying(attribute<'vec3'>('aUv', 'vec3'))
   const m = markPaint(unlit('domeFalls', { transparent: true, depthWrite: false, side: THREE.DoubleSide }), 'water')
-  const flat = paintFlat()
-  const fallPaint = flat ? outdoorPaint()?.fall : undefined
+  const fallPaint = outdoorPaint().fall
   m.colorNode = Fn(() => {
     const u = vUv.x.toVar()
     const v = vUv.y.toVar()
     const L = vUv.z
     const t = o.uTime
-    if (fallPaint) {
-      // 外の塗り（paint.ts）の fall: 滝の色と不透明度は使う側の式（光と葉脈の照りは地図の値を渡す）
-      const light = o.uSkyLight.mul(1.1).add(o.uSunLight.mul(0.35)).add(uniforms.uNightAmb.mul(2.5)).add(vec3(0.008))
-      const breath = sin(t.mul(0.55)).mul(0.38).add(0.62)
-      const c = fallPaint(u, v, L, t, light).toVar()
-      const col = c.xyz.add(paintEmit(vec3(0.55, 1.0, 0.32).mul(uniforms.uVein).mul(breath).mul(0.08)))
-      return vec4(outdoorHaze(col, positionWorld), clamp(c.w, 0.0, 1.0))
-    }
-    // 下へ流れる筋（縦に長い筋。落ちるほど速く、ほどけて白くなる）
-    const y = v.mul(L).toVar()
-    const speed = v.mul(2.6).add(1.6).toVar()
-    const w1 = u.mul(18.0).add(sin(y.mul(0.7).add(u.mul(5.0))).mul(0.6))
-    const s1 = oNoise(vec2(w1, y.mul(0.18).sub(t.mul(speed).mul(0.18))))
-    const s2 = oNoise(vec2(u.mul(47.0).add(3.0), y.mul(0.5).sub(t.mul(speed).mul(0.5)))).toVar()
-    const s3 = oNoise(vec2(u.mul(110.0).add(7.0), y.mul(1.6).sub(t.mul(speed).mul(1.6))))
-    // 外の塗り（paint.ts）の flat: 筋は 2 段の平らな白（細かい筋の 3 つ目は使わない）
-    const streak = (flat ? smoothstep(0.5, 0.53, s1.mul(0.65).add(s2.mul(0.35))).mul(0.6).add(smoothstep(0.66, 0.69, s1.mul(0.65).add(s2.mul(0.35))).mul(0.4)) : smoothstep(0.42, 0.9, s1.mul(0.55).add(s2.mul(0.3)).add(s3.mul(0.15)))).toVar()
-    const edge = smoothstep(0.0, 0.18, u).mul(smoothstep(0.82, 1.0, u).oneMinus()).toVar()
-    const ragged = smoothstep(0.0, 0.35, s2.sub(0.25).add(float(0.5).sub(abs(u.sub(0.5))).mul(1.6)))
-    const a = streak.mul(0.7).add(0.12).mul(edge).mul(mix(1.0, ragged, 0.6)).toVar()
-    a.assign(mix(a, a.mul(0.7).add(edge.mul(0.15)), v))
-    a.mulAssign(smoothstep(0.0, 0.05, v))
-    const base = vec3(0.84, 0.9, 0.93)
+    // 滝の色と不透明度は外の塗り（paint.ts）の fall（光と葉脈の照りを渡す）
     const light = o.uSkyLight.mul(1.1).add(o.uSunLight.mul(0.35)).add(uniforms.uNightAmb.mul(2.5)).add(vec3(0.008))
-    const col = base.mul(light).mul(streak.mul(0.5).add(0.7)).toVar()
     const breath = sin(t.mul(0.55)).mul(0.38).add(0.62)
-    col.addAssign(paintEmit(vec3(0.55, 1.0, 0.32).mul(uniforms.uVein).mul(breath).mul(0.12).mul(streak)))
-    return vec4(outdoorHaze(col, positionWorld), clamp(a, 0.0, 0.92))
+    const c = fallPaint(u, v, L, t, light).toVar()
+    const col = c.xyz.add(paintEmit(vec3(0.55, 1.0, 0.32).mul(uniforms.uVein).mul(breath).mul(0.08)))
+    return vec4(outdoorHaze(col, positionWorld), clamp(c.w, 0.0, 1.0))
   })()
   return withUniforms(m, uniforms)
 }
@@ -290,8 +225,7 @@ export function createMistMaterial(attrs: MistAttributes) {
   const m = new THREE.PointsNodeMaterial({ transparent: true, depthWrite: false, sizeAttenuation: false, fog: false })
   m.name = 'domeMist'
   markPaint(m, 'flat')
-  const flat = paintFlat()
-  const particlePaint = flat ? outdoorPaint()?.particle : undefined
+  const particlePaint = outdoorPaint().particle
   m.positionNode = p
   m.sizeNode = clamp(aMist.x.mul(uniforms.uPx).div(max(depth, 0.5)), 1.0, 900.0).div(screenDPR)
   const vA = varying(
@@ -309,13 +243,8 @@ export function createMistMaterial(attrs: MistAttributes) {
     If(r2.greaterThan(1.0), () => {
       Discard()
     })
-    // 外の塗り（paint.ts）の flat: 粒は縁のくっきりした丸（2 段のうすさ）
-    // 外の塗りの particle を入れていれば、粒の形はその式（しぶき・霧で分ける）
-    const shape = particlePaint
-      ? particlePaint(r2, select(spray, float(1.0), float(0.0)))
-      : flat
-        ? smoothstep(0.55, 0.6, r2).oneMinus().mul(0.35).add(smoothstep(0.15, 0.2, r2).oneMinus().mul(0.25))
-        : r2.oneMinus().mul(r2.oneMinus())
+    // 粒の形は外の塗り（paint.ts）の particle（しぶき・霧で分ける）
+    const shape = particlePaint(r2, select(spray, float(1.0), float(0.0)))
     const a = shape.mul(vA).mul(uniforms.uMist)
     const col = vec3(0.86, 0.9, 0.92).mul(o.uSkyLight.mul(1.1).add(o.uSunLight.mul(0.25)).add(uniforms.uNightAmb.mul(2.2)).add(0.01))
     return vec4(outdoorHaze(col, positionWorld), a)

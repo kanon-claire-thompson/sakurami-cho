@@ -13,7 +13,6 @@ import {
   floor,
   fract as tslFract,
   fwidth,
-  int,
   length,
   max,
   mix,
@@ -22,8 +21,6 @@ import {
   normalize,
   positionGeometry,
   positionWorld,
-  pow,
-  reflect,
   select,
   sin,
   smoothstep,
@@ -40,10 +37,9 @@ import { outdoorHaze, outdoorUniforms, unlit, withUniforms } from '../materials'
 import { ROOF } from './buildingKit'
 import { townLight } from './facades'
 import { depthMaterial, townShadow } from './shadows'
-import { townTextureUniforms } from './townTextures'
 import { townLamps, LAMP, type Lamp } from './lamps'
 import type { TownTile } from './townData'
-import { markPaint, paintEmit, paintFlat, paintLampLight } from '../paint'
+import { markPaint, paintEmit, paintLampLight } from '../paint'
 import { glyph } from '../glyph'
 import { barHalfWidth, thinSize } from '../thin'
 
@@ -475,9 +471,9 @@ export function createPropMaterials() {
     const wp0 = pA.xyz.add(vec3(c.mul(p1.x).sub(s.mul(p1.z)), p1.y, s.mul(p1.x).add(c.mul(p1.z)).negate()))
     return modelWorldMatrixInverse.mul(vec4(wp0, 1.0)).xyz
   }
-  // 外の塗りの flat: 手すりの子柱・アンテナの細い棒は、画素より細くなる遠くで画素の幅まで太らせる（outdoor/thin.ts。塗りを入れなければ前と同じ）。
+  // 手すりの子柱・アンテナの細い棒は、画素より細くなる遠くで画素の幅まで太らせる（outdoor/thin.ts）。
   // 影の深さは太らせない形で（影の地図を描くときのカメラで太らせると、影が太くなる）
-  const positionNode = placed(paintFlat() ? thinSize(pB.xyz, pA.xyz) : pB.xyz)
+  const positionNode = placed(thinSize(pB.xyz, pA.xyz))
   const shadowPosition = placed(pB.xyz)
   const n1 = vec3(n0.x, ct.mul(n0.y).sub(st.mul(n0.z)), st.mul(n0.y).add(ct.mul(n0.z)))
   const vNormal = varying(vec3(c.mul(n1.x).sub(s.mul(n1.z)), n1.y, s.mul(n1.x).add(c.mul(n1.z)).negate()))
@@ -487,13 +483,11 @@ export function createPropMaterials() {
   const vLN = varying(normalGeometry)
 
   const material = markPaint(unlit('townProps', { side: THREE.DoubleSide }), 'light')
-  // 外の塗り（paint.ts）の flat: コンクリート・漆喰の質感と金属の照り返しを省く（形の模様は残す）
-  const flat = paintFlat()
+  // コンクリート・漆喰の質感と金属の照り返しは描かない（形の模様は残す）
   material.positionNode = positionNode
   material.colorNode = Fn(() => {
     const wp = positionWorld.toVar()
     const N = normalize(vNormal).toVar()
-    const V = normalize(cameraPosition.sub(wp)).toVar()
     const kind = vColor.a.toVar()
     const albedo = vColor.rgb.toVar()
     const m = vLocal.add(0.5).mul(vSize).toVar()
@@ -505,10 +499,6 @@ export function createPropMaterials() {
     const fwm = fwidth(m).toVar()
     If(kind.lessThan(0.5).or(kind.greaterThan(9.5)), () => {
       // コンクリートの床の板・仕切り: コンクリートの質感
-      if (!flat) {
-        const t = townTextureUniforms.uBldAlb.sample(vec2(m.x.add(m.z), m.y).div(3.2)).depth(int(4)).rgb.mul(2.0)
-        albedo.mulAssign(pow(max(t, 0.0), vec3(2.2)))
-      }
       If(N.y.lessThan(-0.5), () => {
         ao.assign(0.6)
       })
@@ -516,10 +506,8 @@ export function createPropMaterials() {
       .ElseIf(kind.lessThan(1.5), () => {
         // 金属の手すり（縦の格子。近くは格子の間を抜く）
         const along = select(abs(vLN.x).greaterThan(0.5), m.z, m.x)
-        // 外の塗りの flat: 桟が画素より細くなる遠くでは、桟を画素の幅まで太らせる（抜く・抜かないが画素ごとに入れ替わらないように。outdoor/thin.ts）
-        const bar = flat
-          ? step(float(0.5).sub(barHalfWidth(0.115, select(abs(vLN.x).greaterThan(0.5), fwm.z, fwm.x), 0.11)), abs(tslFract(along.div(0.11)).sub(0.5)))
-          : smoothstep(0.32, 0.45, abs(tslFract(along.div(0.11)).sub(0.5)))
+        // 桟が画素より細くなる遠くでは、桟を画素の幅まで太らせる（抜く・抜かないが画素ごとに入れ替わらないように。outdoor/thin.ts）
+        const bar = step(float(0.5).sub(barHalfWidth(0.115, select(abs(vLN.x).greaterThan(0.5), fwm.z, fwm.x), 0.11)), abs(tslFract(along.div(0.11)).sub(0.5)))
         const top = step(vSize.y.sub(0.06), m.y).add(step(m.y, 0.05))
         If(fine.greaterThan(0.5).and(bar.lessThan(0.5)).and(top.lessThan(0.5)).and(abs(vLN.y).lessThan(0.5)), () => {
           Discard()
@@ -541,38 +529,23 @@ export function createPropMaterials() {
       })
       .ElseIf(kind.lessThan(4.5), () => {
         // 袖看板（文字と、夜は光る）
-        if (flat) {
-          // 外の塗り（paint.ts）の flat: 縦 1 列の文字（画を組んだ形。glyph.ts）。夜は板が光り、文字は板の色と分けて光らせる
-          // （前は文字の上にも板の光を足していたので、明るい板では文字が光に埋もれて白い板に見えた）
-          const cw = max(vSize.z.sub(0.24), 0.1).toVar()
-          const ry = m.y.sub(0.16).div(cw.mul(1.08)).toVar()
-          const q = vec2(m.z.sub(0.12).div(cw), tslFract(ry))
-          const letters = glyph(q.x, q.y, tslFract(sin(floor(ry).mul(12.9).add(vColor.r.mul(37.0)).add(vColor.b.mul(11.0))).mul(43758.5)), max(fwm.z, fwm.y.div(1.08)).div(cw))
-            .mul(step(0.12, m.z))
-            .mul(step(m.z, vSize.z.sub(0.12)))
-            .mul(step(0.16, m.y))
-            .mul(step(floor(ry).add(1.0).mul(cw.mul(1.08)), vSize.y.sub(0.16)))
-            .toVar()
-          const light = dot(albedo, vec3(0.33)).greaterThan(0.4)
-          const lc = select(light, vec3(0.08), vec3(0.85, 0.82, 0.72)).toVar()
-          If(abs(vLN.x).greaterThan(0.5), () => {
-            albedo.assign(mix(albedo, lc, letters.mul(fine)))
-          })
-          emit.assign(mix(vColor.rgb.mul(1.8), lc.mul(select(light, 0.4, 1.6)), letters.mul(fine).mul(step(0.5, abs(vLN.x)))).mul(uniforms.uShop))
-        } else {
-          const cellP = floor(vec2(m.z, m.y).div(vec2(0.18, 0.22)))
-          const letters = step(0.5, tslFract(sin(dot(cellP, vec2(12.9, 78.2))).mul(43758.5)))
-            .mul(step(0.1, m.z))
-            .mul(step(m.z, vSize.z.sub(0.1)))
-            .mul(step(0.12, m.y))
-            .mul(step(m.y, vSize.y.sub(0.12)))
-            .toVar()
-          const lc = select(dot(albedo, vec3(0.33)).greaterThan(0.4), vec3(0.08), vec3(0.85, 0.82, 0.72)).toVar()
-          If(abs(vLN.x).greaterThan(0.5), () => {
-            albedo.assign(mix(albedo, lc, letters.mul(fine)))
-          })
-          emit.assign(vColor.rgb.mul(1.8).add(lc.mul(letters).mul(1.2)).mul(uniforms.uShop))
-        }
+        // 縦 1 列の文字（画を組んだ形。glyph.ts）。夜は板が光り、文字は板の色と分けて光らせる
+        // （前は文字の上にも板の光を足していたので、明るい板では文字が光に埋もれて白い板に見えた）
+        const cw = max(vSize.z.sub(0.24), 0.1).toVar()
+        const ry = m.y.sub(0.16).div(cw.mul(1.08)).toVar()
+        const q = vec2(m.z.sub(0.12).div(cw), tslFract(ry))
+        const letters = glyph(q.x, q.y, tslFract(sin(floor(ry).mul(12.9).add(vColor.r.mul(37.0)).add(vColor.b.mul(11.0))).mul(43758.5)), max(fwm.z, fwm.y.div(1.08)).div(cw))
+          .mul(step(0.12, m.z))
+          .mul(step(m.z, vSize.z.sub(0.12)))
+          .mul(step(0.16, m.y))
+          .mul(step(floor(ry).add(1.0).mul(cw.mul(1.08)), vSize.y.sub(0.16)))
+          .toVar()
+        const light = dot(albedo, vec3(0.33)).greaterThan(0.4)
+        const lc = select(light, vec3(0.08), vec3(0.85, 0.82, 0.72)).toVar()
+        If(abs(vLN.x).greaterThan(0.5), () => {
+          albedo.assign(mix(albedo, lc, letters.mul(fine)))
+        })
+        emit.assign(mix(vColor.rgb.mul(1.8), lc.mul(select(light, 0.4, 1.6)), letters.mul(fine).mul(step(0.5, abs(vLN.x)))).mul(uniforms.uShop))
       })
       .ElseIf(kind.lessThan(5.5), () => {
         // 室外機（前の面にファンの丸）
@@ -588,10 +561,6 @@ export function createPropMaterials() {
       })
       .ElseIf(kind.greaterThan(7.5).and(kind.lessThan(8.5)), () => {
         // 塔屋: 外壁の質感（漆喰）と扉
-        if (!flat) {
-          const t = townTextureUniforms.uBldAlb.sample(vec2(m.x.add(m.z), m.y).div(3.0)).depth(int(1)).rgb.mul(2.0)
-          albedo.mulAssign(pow(max(t, 0.0), vec3(2.2)))
-        }
         If(vLN.z.greaterThan(0.5).and(abs(m.x.sub(vSize.x.mul(0.5))).lessThan(0.45)).and(m.y.lessThan(2.1)), () => {
           albedo.assign(vec3(0.18, 0.19, 0.2))
         })
@@ -600,10 +569,6 @@ export function createPropMaterials() {
     const sh = townShadow(wp, N).toVar()
     const col = townLight(albedo, N, ao, sh, 'prop').toVar()
     col.addAssign(paintLampLight(albedo, townLamps(wp, N)).mul(ao))
-    // 金属の照り返し
-    if (!flat) If(kind.greaterThan(0.5).and(kind.lessThan(2.5)).or(kind.greaterThan(4.5).and(kind.lessThan(7.5))), () => {
-      col.addAssign(u.uSunLight.mul(pow(max(dot(reflect(V.negate(), N), u.uSunDir), 0.0), 30.0)).mul(0.15).mul(sh))
-    })
     col.assign(outdoorHaze(col, wp))
     col.addAssign(paintEmit(emit.mul(uniforms.uLightGain)).mul(exp(dist.negate().div(u.uHazeDist.mul(1.5)))))
     return col

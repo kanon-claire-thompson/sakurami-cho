@@ -3,27 +3,24 @@ import { texture } from 'three/tsl'
 import { townOptions } from '../../townHost'
 
 /**
- * 町の質感（CC0 の実写の質感。アセットの根の textures/town/（assets/textures/town/）、出典は assets/textures/CREDITS.md）。
+ * 町の質感（CC0。アセットの根の textures/town/（assets/textures/town/）、出典は assets/textures/CREDITS.md）。町のアニメ塗りが読むのは次の 2 つだけ
+ * （前のリアル寄りの見た目の地面の質感 ground-albedo / ground-normal は 2026-10-20 に無くした）:
  *
- * - building-albedo / building-normal（512px × 9 層を縦に並べた 1 枚）: 0 板張り・1 漆喰・2 石・3 煉瓦・4 コンクリート・5 波板・6 タイル・7 瓦・8 スレート
- * - ground-albedo / ground-normal（1024px × 8 層）: 0 芝・1 土・2 砂利・3 石畳・4 敷石・5 アスファルト・6 樹皮・7 草地
- * - foliage（1024px の 2×2）: 葉のかたまりの板（広葉樹の密・広葉樹の疎・楓・針葉樹）。A = 葉の形
+ * - building-albedo / building-normal（512px × 9 層を縦に並べた 1 枚）: 0 板張り・1 漆喰・2 石・3 煉瓦・4 コンクリート・5 波板・6 タイル・7 瓦・8 スレート。
+ *   中のある建物の中の板の床（interior/interiorMaterial.ts の木目）が読む
+ * - foliage（1024px の 2×2）: 葉のかたまりの板（広葉樹の密・広葉樹の疎・楓・針葉樹）。A = 葉の形（木の塊の形を切り抜く）
  *
  * 色の層は明るさの平均を 0.5 にそろえてある（シェーダーはデータの色 × 2 × 質感で塗る。ミップマップの遠くでは 1 倍になる）。
  * 縦長の 1 枚を読んで DataArrayTexture（層の配列）にする。読めないときは 1 色の層で代わりにする（町は描ける）
  */
 
 export const BUILDING_LAYER = { wood: 0, plaster: 1, stone: 2, brick: 3, concrete: 4, metal: 5, tile: 6, kawara: 7, slate: 8 } as const
-export const GROUND_LAYER = { grass: 0, dirt: 1, gravel: 2, cobble: 3, slab: 4, asphalt: 5, bark: 6, meadow: 7 } as const
 
 const BUILDING_LAYERS = 9
-const GROUND_LAYERS = 8
 
 export interface TownTextureImages {
   buildingAlbedo: ImageBitmap | null
   buildingNormal: ImageBitmap | null
-  groundAlbedo: ImageBitmap | null
-  groundNormal: ImageBitmap | null
   foliage: ImageBitmap | null
 }
 
@@ -40,14 +37,8 @@ export async function loadTownTextures(): Promise<TownTextureImages> {
       return null
     }
   }
-  const [buildingAlbedo, buildingNormal, groundAlbedo, groundNormal, foliage] = await Promise.all([
-    image('building-albedo.webp'),
-    image('building-normal.webp'),
-    image('ground-albedo.webp'),
-    image('ground-normal.webp'),
-    image('foliage.webp'),
-  ])
-  return { buildingAlbedo, buildingNormal, groundAlbedo, groundNormal, foliage }
+  const [buildingAlbedo, buildingNormal, foliage] = await Promise.all([image('building-albedo.webp'), image('building-normal.webp'), image('foliage.webp')])
+  return { buildingAlbedo, buildingNormal, foliage }
 }
 
 function pixels(image: ImageBitmap) {
@@ -103,15 +94,13 @@ function placeholderArray() {
 }
 
 /**
- * 町の質感の uniform（建物・地面・木・小物のシェーダーが共有する。createTownTextures が中身を入れる）。
+ * 町の質感の uniform（中のある建物の床・木のシェーダーが読む。createTownTextures が中身を入れる）。
  * WebGPU への移行（第 1 段）から TSL の TextureNode（TSL の材質は townTextureUniforms.uBldAlb.sample(uv).depth(層) のように読む。value を替えると
  * 読む側の材質も替わる）。名前は前の GLSL の uniform と同じ
  */
 export const townTextureUniforms = {
   uBldAlb: texture(placeholderArray()),
   uBldNrm: texture(placeholderArray()),
-  uGndAlb: texture(placeholderArray()),
-  uGndNrm: texture(placeholderArray()),
   uFoliage: texture(new THREE.DataTexture(new Uint8Array([60, 90, 40, 255]), 1, 1)),
 }
 
@@ -121,7 +110,5 @@ export function createTownTextures(images: TownTextureImages | null, anisotropy:
   // 色の層も sRGB の値のまま読む（シェーダーが 2 倍してから 2.2 乗する。ミップマップの遠くがちょうど 1 倍になるように）
   u.uBldAlb.value = arrayTexture(images?.buildingAlbedo ?? null, BUILDING_LAYERS, false, anisotropy, [128, 128, 128, 255])
   u.uBldNrm.value = arrayTexture(images?.buildingNormal ?? null, BUILDING_LAYERS, false, anisotropy, [128, 128, 255, 255])
-  u.uGndAlb.value = arrayTexture(images?.groundAlbedo ?? null, GROUND_LAYERS, false, anisotropy, [128, 128, 128, 255])
-  u.uGndNrm.value = arrayTexture(images?.groundNormal ?? null, GROUND_LAYERS, false, anisotropy, [128, 128, 255, 255])
   u.uFoliage.value = plainTexture(images?.foliage ?? null, anisotropy)
 }

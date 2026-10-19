@@ -35,10 +35,7 @@ import {
   normalize,
   positionGeometry,
   positionWorld,
-  pow,
-  reflect,
   select,
-  sign,
   smoothstep,
   step,
   transpose,
@@ -50,12 +47,11 @@ import {
   vec3,
   vec4,
 } from 'three/tsl'
-import { colorUniform, oHash, oNoise, outdoorHaze, outdoorUniforms, skyColor, unlit, withUniforms } from '../materials'
+import { colorUniform, oHash, oNoise, outdoorHaze, outdoorUniforms, unlit, withUniforms } from '../materials'
 import { townLight } from '../town/facades'
 import { townShadow } from '../town/shadows'
-import { townTextureUniforms } from '../town/townTextures'
 import { townLamps } from '../town/lamps'
-import { markPaint, outdoorPaint, paintEmit, paintFlat } from '../paint'
+import { markPaint, outdoorPaint, paintEmit } from '../paint'
 
 type Node<T = unknown> = THREE.Node<T>
 
@@ -127,46 +123,6 @@ export const lineColor = (k: Node<'float'>) => transitUniforms.uLineColors.eleme
 export const LUMA = vec3(0.2126, 0.7152, 0.0722)
 export const lum = (c: Node<'vec3'>) => dot(c, LUMA)
 
-/** 質感の層の色（sRGB の値を 2 倍して 2.2 乗。遠くのミップマップがちょうど 1 倍） */
-export const layerAlb = (tex: typeof townTextureUniforms.uBldAlb, p: Node<'vec2'>, layer: number) =>
-  pow(max(tex.sample(p).depth(int(layer)).rgb.mul(2.0), 0.0), vec3(2.2))
-
-/** 映り込み（地平線より下は町と地面の暗い色） */
-export const envRefl = Fn(([R]: [Node<'vec3'>]) => {
-  const u = outdoorUniforms
-  const c = vec3(0.0).toVar()
-  If(R.y.greaterThan(0.0), () => {
-    c.assign(skyColor(R))
-  }).Else(() => {
-    c.assign(mix(skyColor(vec3(R.x, 0.02, R.z)).mul(0.45), u.uSkyLight.mul(0.22).add(u.uSunLight.mul(0.03)), smoothstep(0.0, 0.25, R.y.negate())))
-  })
-  return c
-})
-
-/** 金属の度合いからのフレネル（f0 = 0.04〜0.9） */
-export const metalFresnel = (metal: Node<'float'>, N: Node<'vec3'>, V: Node<'vec3'>) => {
-  const f0 = mix(0.04, 0.9, metal)
-  return f0.add(f0.oneMinus().mul(pow(clamp(dot(N, V).oneMinus(), 0.0, 1.0), 5.0)))
-}
-
-/** 太陽のハイライト（つや gloss・フレネル fres・影 sh） */
-export const sunSpecular = (N: Node<'vec3'>, V: Node<'vec3'>, gloss: Node<'float'>, fres: Node<'float'>, sh: Node<'float'>) => {
-  const u = outdoorUniforms
-  const H = normalize(V.add(u.uSunDir))
-  const pw = mix(10.0, 260.0, gloss).toVar()
-  return u.uSunLight.mul(pow(max(dot(N, H), 0.0), pw).mul(pw.add(2.0)).div(8.0).mul(fres).mul(sh).mul(max(dot(N, u.uSunDir), 0.0)).mul(gloss))
-}
-
-/** ニスを塗った木の木目 */
-export const woodGrain = Fn(([p]: [Node<'vec2'>]) => {
-  const n = oNoise(vec2(p.x.mul(2.0), p.y.mul(30.0))).toVar()
-  const rings = sin01(p.y.mul(70.0).add(n.mul(6.0)).add(oNoise(p.mul(vec2(0.6, 4.0))).mul(9.0)))
-  return rings.mul(0.12).add(0.84).add(n.mul(0.1))
-})
-function sin01(x: Node<'float'>) {
-  return x.sin().mul(0.5).add(0.5)
-}
-
 const interleavedMatrices = new WeakMap<THREE.InstancedBufferAttribute, THREE.InstancedInterleavedBuffer>()
 
 /**
@@ -222,58 +178,6 @@ export const facingNormal = () => normalize(normalWorldGeometry).mul(faceDirecti
 /* 交通の物の材質                                                              */
 /* -------------------------------------------------------------------------- */
 
-/**
- * 客室の中（局所の座標: x = 横、y = 上、z = 前後。床の高さ floorY）。窓の面の点 p と、局所の視線 rd（窓へ向かう向き）。
- * 戻り値は光を当てたあとの色
- */
-const cabin = Fn(([p, rd, lit, seed, floorY]: [Node<'vec3'>, Node<'vec3'>, Node<'float'>, Node<'float'>, Node<'float'>]) => {
-  const u = outdoorUniforms
-  const hw = abs(p.x).add(0.04).toVar()
-  const side = sign(p.x).toVar()
-  const r = vec3(select(abs(rd.x).lessThan(1e-3), side.negate().mul(1e-3), rd.x), rd.y, rd.z).toVar()
-  const ceilY = floorY.add(2.05)
-  // 向かいの壁（x = -side * hw）・床・天井
-  const tx = side.negate().mul(hw).sub(p.x).div(r.x).toVar()
-  const ty = select(r.y.lessThan(0.0), floorY.sub(p.y).div(r.y), ceilY.sub(p.y).div(max(r.y, 1e-3))).toVar()
-  const t = max(min(tx, ty), 0.0).toVar()
-  const h = p.add(r.mul(t)).toVar()
-  // 車内の灯り（LED の電球色。夜の窓が明るく見えるよう強め）
-  const lamp = vec3(1.0, 0.86, 0.66).mul(3.2)
-  const dayAmb = u.uSkyLight.mul(0.35).add(u.uSunLight.mul(0.05)).toVar()
-  const col = vec3(0.0).toVar()
-  If(ty.lessThan(tx).and(r.y.lessThan(0.0)), () => {
-    // 床（灰色の床材）
-    col.assign(vec3(0.12, 0.12, 0.115).mul(oNoise(h.xz.mul(3.0)).mul(0.2).add(0.9)))
-    col.mulAssign(dayAmb.mul(1.4).add(lamp.mul(lit).mul(1.1)))
-  })
-    .ElseIf(ty.lessThan(tx), () => {
-      // 天井（白い板と、まんなかの灯りの帯）
-      const strip = smoothstep(0.08, 0.14, abs(h.x)).oneMinus()
-      col.assign(vec3(0.6).mul(dayAmb.add(lamp.mul(lit).mul(0.6))).add(lamp.mul(strip).mul(lit).mul(2.5)))
-    })
-    .Else(() => {
-      // 向かいの壁: 腰の高さの長い座席（モケット）・その上の窓（外）・手すりの柱
-      const y = h.y.sub(floorY).toVar()
-      const seatC = mix(vec3(0.08, 0.16, 0.12), vec3(0.18, 0.08, 0.06), step(0.5, fract(seed.mul(7.0))))
-      If(y.lessThan(0.85), () => {
-        col.assign(select(y.greaterThan(0.42), seatC, vec3(0.05)).mul(dayAmb.mul(1.2).add(lamp.mul(lit))))
-      })
-        .ElseIf(y.lessThan(0.95), () => {
-          col.assign(vec3(0.25).mul(dayAmb.add(lamp.mul(lit))))
-        })
-        .ElseIf(y.lessThan(1.9), () => {
-          col.assign(mix(u.uSkyLight.mul(0.55).add(u.uSunLight.mul(0.08)), vec3(0.03, 0.035, 0.05), lit.mul(0.6).add(0.25)))
-        })
-        .Else(() => {
-          col.assign(vec3(0.5).mul(dayAmb.add(lamp.mul(lit).mul(0.8))))
-        })
-      const pole = smoothstep(0.015, 0.03, abs(fract(h.z.div(1.6)).sub(0.5)).mul(1.6)).oneMinus()
-      col.assign(mix(col, vec3(0.6).mul(dayAmb.add(lamp.mul(lit))).add(0.05), pole.mul(0.8)))
-      col.mulAssign(exp(t.mul(-0.3)).mul(0.25).add(0.75))
-    })
-  return col
-})
-
 /** 交通の物の色（instanced = InstancedMesh で描くか。前の GLSL の USE_INSTANCING） */
 function transitColor(builder: THREE.NodeBuilder) {
   const object = builder.object as THREE.InstancedMesh
@@ -281,13 +185,9 @@ function transitColor(builder: THREE.NodeBuilder) {
   const u = outdoorUniforms
   const tu = transitUniforms
   const vInfo = instanced ? attribute<'vec4'>('iInfo', 'vec4') : vec4(0.0, 0.0, 0.0, 0.5)
-  // 外の塗り（paint.ts）の flat: 汚れ・むら・質感の写真・車内の奥（インテリアマッピング）・照り返しを省く（窓は塗りの window・光る物は emit）
-  const flat = paintFlat()
-  const paintWindow = flat ? outdoorPaint()?.window : undefined
+  // 汚れ・むら・質感の写真・車内の奥（インテリアマッピング）・照り返しは描かない（窓は外の塗りの window・光る物は emit）
+  const paintWindow = outdoorPaint().window
   return Fn(() => {
-    const { rt } = localFrame(builder)
-    // 視線を形の局所の座標へ（回転だけ。大きさは 1）
-    const vLocalView = varying(rt.mul(positionWorld.sub(cameraPosition)))
     const wp = positionWorld.toVar()
     const N = facingNormal().toVar()
     const vLocal = positionGeometry.toVar()
@@ -309,72 +209,32 @@ function transitColor(builder: THREE.NodeBuilder) {
     const an = abs(vLocalN).toVar()
     const p = select(an.y.greaterThan(0.7), vLocal.xz, select(an.x.greaterThan(an.z), vLocal.zy, vLocal.xy)).toVar()
     const wuv = select(abs(N.y).greaterThan(0.7), wp.xz, select(abs(N.x).greaterThan(abs(N.z)), wp.zy, wp.xy)).toVar()
-    const n1 = oNoise(p.mul(1.3).add(info.w.mul(17.0))).toVar()
     // 車両の下ほど暗い（床下・台車のまわり）
     if (instanced) ao.assign(mix(0.55, 1.0, smoothstep(0.1, 1.0, vLocal.y)))
     If(id.lessThan(0.5), () => {
-      // 塗装（aux = つや）: 下ほど汚れ
+      // 塗装（aux = つや）
       gloss.assign(aux.mul(0.6).add(0.25))
-      if (instanced && !flat) {
-        const grime = smoothstep(0.3, 1.4, vLocal.y).oneMinus().mul(n1.mul(0.5).add(0.5))
-        albedo.mulAssign(grime.mul(-0.28).add(1.0))
-      }
-      if (!flat) albedo.mulAssign(oNoise(p.mul(0.4)).mul(0.08).add(0.96))
     })
       .ElseIf(id.lessThan(1.5), () => {
         // 窓
-        if (paintWindow) {
-          // 平らな塗り: 窓の式（車内の灯りが点いていれば灯りの色）。窓の中の位置は局所の座標から
-          const lit = info.y.mul(tu.uLampOn).mul(select(aux.lessThan(0.5), 1.0, 0.0))
-          const cell = fract(vec2(select(an.x.greaterThan(an.z), vLocal.z, vLocal.x).mul(0.8), vLocal.y.mul(0.9)))
-          result.assign(outdoorHaze(paintWindow(lit, vec3(1.0, 0.86, 0.66).mul(1.6), N, V, cell), wp))
-          done.assign(1.0)
-          return
-        }
-        const Nl = normalize(vLocalN).toVar()
-        const rd = normalize(vLocalView).toVar()
-        const fres = pow(clamp(dot(N, V).oneMinus(), 0.0, 1.0), 5.0).mul(0.94).add(0.06).toVar()
-        const R = reflect(V.negate(), N).toVar()
-        const refl = (paintFlat() ? envRefl(R) : envRefl(R).add(u.uSunLight.mul(pow(max(dot(R, u.uSunDir), 0.0), 600.0)).mul(20.0).mul(smoothstep(-0.02, 0.05, u.uSunDir.y)))).toVar()
-        const inside = vec3(0.0).toVar()
-        const lit = info.y.mul(tu.uLampOn).toVar()
-        If(aux.lessThan(0.5).and(abs(Nl.x).greaterThan(0.5)).and(dot(rd, Nl).lessThan(0.0)), () => {
-          inside.assign(cabin(vLocal, rd, lit, info.w, aux.mul(10.0)))
-        })
-          .ElseIf(aux.greaterThan(1.5), () => {
-            inside.assign(vec3(0.02, 0.022, 0.025).add(vec3(1.0, 0.86, 0.66).mul(lit).mul(0.15)))
-          })
-          .Else(() => {
-            inside.assign(vec3(0.025, 0.028, 0.03).mul(u.uSkyLight.mul(2.0).add(0.2)).add(vec3(1.0, 0.86, 0.66).mul(lit).mul(select(aux.lessThan(0.5), 0.6, 0.0))))
-          })
-        const col = mix(inside, refl, clamp(fres.mul(0.85).add(0.06), 0.0, 0.9))
-        result.assign(outdoorHaze(col, wp))
+        // 窓の式（車内の灯りが点いていれば灯りの色）。窓の中の位置は局所の座標から
+        const lit = info.y.mul(tu.uLampOn).mul(select(aux.lessThan(0.5), 1.0, 0.0))
+        const cell = fract(vec2(select(an.x.greaterThan(an.z), vLocal.z, vLocal.x).mul(0.8), vLocal.y.mul(0.9)))
+        result.assign(outdoorHaze(paintWindow(lit, vec3(1.0, 0.86, 0.66).mul(1.6), N, V, cell), wp))
         done.assign(1.0)
       })
       .ElseIf(id.lessThan(2.5), () => {
         // ステンレス・アルミ（細かい筋）
         metal.assign(1.0)
         gloss.assign(0.55)
-        if (!flat) albedo.mulAssign(oNoise(vec2(p.x.mul(0.5), p.y.mul(40.0))).mul(0.1).add(0.9))
       })
       .ElseIf(id.lessThan(3.5), () => {
         gloss.assign(aux.mul(0.4).add(0.05))
-        if (!flat) albedo.mulAssign(n1.mul(0.15).add(0.85))
       })
       .ElseIf(id.lessThan(4.5), () => {
-        if (flat) {
-          // 平らな塗り: 多肉植物と苔の 2 色の塊
-          albedo.assign(mix(vec3(0.035, 0.07, 0.022), vec3(0.09, 0.07, 0.03), smoothstep(0.62, 0.66, oNoise(p.mul(2.7).add(3.0)))))
-          gloss.assign(0.03)
-          return
-        }
-        // 屋根庭: 多肉植物と苔のまだら（芝の質感の層を緑と赤茶にまぜる）
-        const g = layerAlb(townTextureUniforms.uGndAlb, p.div(1.6), 0)
-        const m = oNoise(p.mul(2.7).add(3.0)).toVar()
-        albedo.assign(mix(vec3(0.035, 0.07, 0.022), vec3(0.09, 0.07, 0.03), smoothstep(0.55, 0.8, m)).mul(clamp(lum(g).div(0.2), 0.0, 1.5).mul(0.6).add(0.7)))
-        albedo.assign(mix(albedo, vec3(0.2, 0.06, 0.08), smoothstep(0.78, 0.9, oNoise(p.mul(6.0))).mul(0.6)))
+        // 屋根庭: 多肉植物と苔の 2 色の塊
+        albedo.assign(mix(vec3(0.035, 0.07, 0.022), vec3(0.09, 0.07, 0.03), smoothstep(0.62, 0.66, oNoise(p.mul(2.7).add(3.0)))))
         gloss.assign(0.03)
-        ao.mulAssign(m.mul(0.2).add(0.8))
       })
       .ElseIf(id.lessThan(5.5), () => {
         // 行き先の表示（aux = 表示の左の端の局所の座標）: 系統の色の四角と、橙の点の文字（いつも光る。昼はうすく見える）
@@ -411,10 +271,6 @@ function transitColor(builder: THREE.NodeBuilder) {
         gloss.assign(0.9)
       })
       .ElseIf(id.lessThan(8.5), () => {
-        if (!flat) {
-          const t = layerAlb(townTextureUniforms.uBldAlb, vec2(p.x.mul(0.5), p.y.mul(0.5)), 0)
-          albedo.mulAssign(mix(vec3(1.0), t, 0.7))
-        }
         gloss.assign(0.15)
       })
       .ElseIf(id.lessThan(9.5), () => {
@@ -423,26 +279,20 @@ function transitColor(builder: THREE.NodeBuilder) {
         emit.assign(vc.mul(aux).mul(tu.uLampOn).mul(tu.uLightGain))
         albedo.assign(vc.mul(0.4))
         gloss.assign(0.3)
-        if (flat) {
-          // 外の塗り（paint.ts）の flat: 停留所の屋根の下（とゴンドラの天井）の大きな灯りの板（白に近い色・aux 1.6）は、下から見ると面全体が光る平らな白い板に
-          // 見えたので、金属の天井板（継ぎ目の線と、灯りのまわりの明るい輪の 2 段）に、決まった間隔の丸い灯り（1.5m ごと）を並べる
-          If(aux.greaterThan(1.55).and(aux.lessThan(1.65)).and(vc.b.greaterThan(0.6)).and(N.y.lessThan(-0.7)), () => {
-            const q = fract(wuv.div(1.5)).sub(0.5).toVar()
-            const r = length(q)
-            const disc = step(r, 0.1)
-            const pool = step(r, 0.25)
-            const seam = step(0.47, max(abs(q.x), abs(q.y)))
-            const on = tu.uLampOn.mul(tu.uLightGain)
-            albedo.assign(mix(vec3(0.5, 0.52, 0.52), vec3(0.22, 0.23, 0.24), seam))
-            emit.assign(vc.mul(on).mul(disc.mul(2.4).add(pool.mul(disc.oneMinus()).mul(0.22)).add(seam.oneMinus().mul(0.05))))
-          })
-        }
+        // 停留所の屋根の下（とゴンドラの天井）の大きな灯りの板（白に近い色・aux 1.6）は、下から見ると面全体が光る平らな白い板に
+        // 見えたので、金属の天井板（継ぎ目の線と、灯りのまわりの明るい輪の 2 段）に、決まった間隔の丸い灯り（1.5m ごと）を並べる
+        If(aux.greaterThan(1.55).and(aux.lessThan(1.65)).and(vc.b.greaterThan(0.6)).and(N.y.lessThan(-0.7)), () => {
+          const q = fract(wuv.div(1.5)).sub(0.5).toVar()
+          const r = length(q)
+          const disc = step(r, 0.1)
+          const pool = step(r, 0.25)
+          const seam = step(0.47, max(abs(q.x), abs(q.y)))
+          const on = tu.uLampOn.mul(tu.uLightGain)
+          albedo.assign(mix(vec3(0.5, 0.52, 0.52), vec3(0.22, 0.23, 0.24), seam))
+          emit.assign(vc.mul(on).mul(disc.mul(2.4).add(pool.mul(disc.oneMinus()).mul(0.22)).add(seam.oneMinus().mul(0.05))))
+        })
       })
       .ElseIf(id.lessThan(10.5), () => {
-        if (!flat) {
-          const t = layerAlb(townTextureUniforms.uBldAlb, wuv.div(3.2), 4)
-          albedo.mulAssign(mix(vec3(1.0), vec3(lum(t)).mul(2.0), 0.7))
-        }
         If(aux.greaterThan(0.01), () => {
           const g = abs(fract(wuv.div(aux).add(0.5)).sub(0.5)).mul(aux)
           const joint = smoothstep(0.004, fwidth(wuv.x).add(0.012), min(g.x, g.y)).oneMinus()
@@ -451,10 +301,6 @@ function transitColor(builder: THREE.NodeBuilder) {
         gloss.assign(0.06)
       })
       .ElseIf(id.lessThan(11.5), () => {
-        if (!flat) {
-          const t = layerAlb(townTextureUniforms.uGndAlb, wuv.div(1.2), 2)
-          albedo.mulAssign(mix(vec3(1.0), t.mul(2.0), 0.8))
-        }
         gloss.assign(0.04)
       })
       .ElseIf(id.lessThan(12.5), () => {
@@ -475,7 +321,6 @@ function transitColor(builder: THREE.NodeBuilder) {
       })
       .ElseIf(id.lessThan(14.5), () => {
         // 布
-        if (!flat) albedo.mulAssign(oNoise(p.mul(30.0)).mul(0.3).add(0.85))
         gloss.assign(0.03)
       })
       .Else(() => {
@@ -493,13 +338,7 @@ function transitColor(builder: THREE.NodeBuilder) {
     If(done.lessThan(0.5), () => {
       const sh = townShadow(wp, N).toVar()
       const col = townLight(albedo.mul(metal.mul(-0.6).add(1.0)), N, ao, sh, 'vehicle').toVar()
-      // 外の塗り（paint.ts）の flat のときは、つやの照り返し・映り込みを省く
-      if (!paintFlat()) {
-        const fres = metalFresnel(metal, N, V).toVar()
-        col.addAssign(sunSpecular(N, V, gloss, fres, sh))
-        const R = reflect(V.negate(), N)
-        col.addAssign(envRefl(R).mul(fres).mul(mix(gloss.mul(0.5), 0.9, metal)).mul(mix(vec3(1.0), albedo.mul(2.0), metal)).mul(ao))
-      }
+      // つやの照り返し・映り込みは描かない
       // 夜: 町の灯り
       col.addAssign(albedo.mul(townLamps(wp, N)))
       col.assign(outdoorHaze(col, wp))
@@ -528,7 +367,6 @@ export function createWireMaterial(color: THREE.ColorRepresentation) {
   const uniforms = { uColor: colorUniform(new THREE.Color(color)), uPx: uniform(500), uGlow: uniform(0), uGlowColor: colorUniform(new THREE.Color(1, 0.8, 0.5)) }
   const m = markPaint(unlit('transitWire', { transparent: true, depthWrite: false, side: THREE.DoubleSide }), 'light')
   const paint = outdoorPaint()
-  const u = outdoorUniforms
   const aOther = attribute<'vec3'>('aOther', 'vec3')
   const aSide = attribute<'float'>('aSide', 'float')
   const aWidth = attribute<'float'>('aWidth', 'float')
@@ -547,10 +385,8 @@ export function createWireMaterial(color: THREE.ColorRepresentation) {
   const vAlpha = varying(clamp(px.div(1.2), 0.0, 1.0))
   const vWorld = varying(wp0)
   const vAlong = varying(aSide)
-  // 外の塗り（paint.ts）の light を入れたら、線の色は上向きの面の光（綱の向きは平均）。光る分は emit
-  const col = paint?.light
-    ? paint.light(uniforms.uColor, vec3(0.0, 1.0, 0.0), float(1.0), float(1.0), 'structure').add(paintEmit(uniforms.uGlowColor.mul(uniforms.uGlow)))
-    : uniforms.uColor.mul(u.uSkyLight.mul(0.8).add(u.uSunLight.mul(0.35))).add(uniforms.uGlowColor.mul(uniforms.uGlow))
+  // 線の色は上向きの面の光（外の塗りの light。綱の向きは平均）。光る分は emit
+  const col = paint.light(uniforms.uColor, vec3(0.0, 1.0, 0.0), float(1.0), float(1.0), 'structure').add(paintEmit(uniforms.uGlowColor.mul(uniforms.uGlow)))
   m.colorNode = outdoorHaze(col, vWorld)
   m.opacityNode = vAlpha.mul(abs(vAlong).mul(-0.3).add(1.0))
   return withUniforms(m, uniforms)

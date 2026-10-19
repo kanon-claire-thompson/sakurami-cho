@@ -151,11 +151,20 @@ export function createFallMaterial() {
   const vUv = varying(attribute<'vec3'>('aUv', 'vec3'))
   const m = markPaint(unlit('domeFalls', { transparent: true, depthWrite: false, side: THREE.DoubleSide }), 'water')
   const flat = paintFlat()
+  const fallPaint = flat ? outdoorPaint()?.fall : undefined
   m.colorNode = Fn(() => {
     const u = vUv.x.toVar()
     const v = vUv.y.toVar()
     const L = vUv.z
     const t = o.uTime
+    if (fallPaint) {
+      // 外の塗り（paint.ts）の fall: 滝の色と不透明度は使う側の式（光と葉脈の照りは地図の値を渡す）
+      const light = o.uSkyLight.mul(1.1).add(o.uSunLight.mul(0.35)).add(uniforms.uNightAmb.mul(2.5)).add(vec3(0.008))
+      const breath = sin(t.mul(0.55)).mul(0.38).add(0.62)
+      const c = fallPaint(u, v, L, t, light).toVar()
+      const col = c.xyz.add(paintEmit(vec3(0.55, 1.0, 0.32).mul(uniforms.uVein).mul(breath).mul(0.08)))
+      return vec4(outdoorHaze(col, positionWorld), clamp(c.w, 0.0, 1.0))
+    }
     // 下へ流れる筋（縦に長い筋。落ちるほど速く、ほどけて白くなる）
     const y = v.mul(L).toVar()
     const speed = v.mul(2.6).add(1.6).toVar()
@@ -277,6 +286,7 @@ export function createMistMaterial(attrs: MistAttributes) {
   m.name = 'domeMist'
   markPaint(m, 'flat')
   const flat = paintFlat()
+  const particlePaint = flat ? outdoorPaint()?.particle : undefined
   m.positionNode = p
   m.sizeNode = clamp(aMist.x.mul(uniforms.uPx).div(max(depth, 0.5)), 1.0, 900.0).div(screenDPR)
   const vA = varying(
@@ -295,7 +305,13 @@ export function createMistMaterial(attrs: MistAttributes) {
       Discard()
     })
     // 外の塗り（paint.ts）の flat: 粒は縁のくっきりした丸（2 段のうすさ）
-    const a = (flat ? smoothstep(0.55, 0.6, r2).oneMinus().mul(0.35).add(smoothstep(0.15, 0.2, r2).oneMinus().mul(0.25)) : r2.oneMinus().mul(r2.oneMinus())).mul(vA).mul(uniforms.uMist)
+    // 外の塗りの particle を入れていれば、粒の形はその式（しぶき・霧で分ける）
+    const shape = particlePaint
+      ? particlePaint(r2, select(spray, float(1.0), float(0.0)))
+      : flat
+        ? smoothstep(0.55, 0.6, r2).oneMinus().mul(0.35).add(smoothstep(0.15, 0.2, r2).oneMinus().mul(0.25))
+        : r2.oneMinus().mul(r2.oneMinus())
+    const a = shape.mul(vA).mul(uniforms.uMist)
     const col = vec3(0.86, 0.9, 0.92).mul(o.uSkyLight.mul(1.1).add(o.uSunLight.mul(0.25)).add(uniforms.uNightAmb.mul(2.2)).add(0.01))
     return vec4(outdoorHaze(col, positionWorld), a)
   })()

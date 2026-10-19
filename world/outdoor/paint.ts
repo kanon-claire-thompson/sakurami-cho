@@ -81,6 +81,16 @@ export interface OutdoorPaint {
    * まわりの明るさ、N = 法線、ao。戻り値は拡散の色（つやの照り返しは flat のとき足さない）
    */
   interior?: (albedo: V3, E: V3, amb: V3, N: V3, ao: F) => V3
+  /**
+   * 光る物の色（看板の文字・灯具・信号・前照灯・行き先の表示・LED・ネオン・ドームの葉脈・灯台の光の帯）。col = 前の光の色（HDR のリニア。強さ込み）。
+   * 戻り値はトーンマッピングの前の色。flat のときは、地図の側でも光の模様（ゆらぎのノイズ・にじみのぼかし）を省いて、形の決まった光にする
+   */
+  emit?: (col: V3) => V3
+  /**
+   * 透けるガラス（flat のとき。乗り物の窓・ショーウィンドウ・ドームと温室のガラス・駅の屋根）。N = 見ている側の面の法線、V = 視線（面からカメラへ）、
+   * wp = 世界の位置、room = 向こうの灯りの色（明るさ込み。消えていれば 0）。戻り値は rgb（トーンマッピングの前の色）と透け a（0〜1）
+   */
+  glass?: (N: V3, V: V3, wp: V3, room: V3) => Node<'vec4'>
   /** 細かい模様を省く（上の説明） */
   flat?: boolean
 }
@@ -101,3 +111,24 @@ export function outdoorPaint(): Readonly<OutdoorPaint> | null {
 
 /** 細かい模様を省くか（材質を組み立てるときに読む） */
 export const paintFlat = () => paint?.flat === true
+
+/** 光る物の色（外の塗りの emit を入れていれば、それを通す。入れていなければ col のまま） */
+export const paintEmit = (col: V3): V3 => (paint?.emit ? paint.emit(col) : col)
+
+/**
+ * 材質に付ける塗りの印の名前（material.userData のキー）。外の塗りを入れているときだけ、塗りの口を通った材質に付ける（使う側の監査が読む。
+ * 描き方は変えない）。値は塗りの種類（PaintMarkKind）
+ */
+export const PAINT_MARK = 'outdoorPaint'
+
+/**
+ * 塗りの種類: light（光の式）・flat（平らな色の塗り分け）・window・water・sky・interior・glow（意図して平らに光らせる物。看板の文字・灯り・LED など）・
+ * helper（色を書かない・当たりだけの物）
+ */
+export type PaintMarkKind = 'light' | 'flat' | 'window' | 'water' | 'sky' | 'interior' | 'glow' | 'helper'
+
+/** 材質に塗りの印を付ける（外の塗りを入れていなければ何もしない）。材質を返す */
+export function markPaint<M extends { userData: Record<string, unknown> }>(m: M, kind: PaintMarkKind): M {
+  if (paint) m.userData[PAINT_MARK] = kind
+  return m
+}

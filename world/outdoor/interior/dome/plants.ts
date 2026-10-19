@@ -44,6 +44,7 @@ import { townLight } from '../../town/facades'
 import { depthMaterial, townShadow } from '../../town/shadows'
 import type { PlantItem } from './layout'
 import { leafShadow } from '../../town/trees'
+import { markPaint, paintEmit, paintFlat } from '../../paint'
 
 /**
  * ガーデンドームの新しい形の植物（町の段階 4 の後半）: ヤシ・木生シダ・シダ・オオタニワタリ・アロカシア（大きな葉に葉脈ライティング）・
@@ -668,7 +669,8 @@ export function createPlantMaterials(nightAmb: THREE.Vector3) {
   const vAo = varying(aAo)
   const vSeed = varying(aWind.w)
 
-  const material = unlit('domePlants', { side: THREE.DoubleSide, alphaToCoverage: true })
+  const material = markPaint(unlit('domePlants', { side: THREE.DoubleSide, alphaToCoverage: true }), 'light')
+  const flat = paintFlat()
   material.positionNode = positionNode
   material.colorNode = Fn(() => {
     const wp = positionWorld.toVar()
@@ -693,6 +695,29 @@ export function createPlantMaterials(nightAmb: THREE.Vector3) {
     })
     const albedo = vCol.rgb.toVar()
     const ao = vAo.toVar()
+    if (flat) {
+      // 外の塗り（paint.ts）の flat: 葉は付け根と先の 2 段の色・葉脈の形（明るい筋）だけ、幹と苔は平らな色。まだら・凹凸・透ける光・つやは描かない。
+      // 光は木の光の式（'tree'。3 段）、葉脈ライティングは形のくっきりした筋を光る物の色の式（emit）に
+      const veinQ = smoothstep(0.45, 0.55, vein).toVar()
+      If(leafy, () => {
+        albedo.mulAssign(mix(0.82, 1.05, smoothstep(0.45, 0.55, vUv.y)))
+        albedo.assign(mix(albedo, albedo.mul(vec3(1.25, 1.3, 0.95)), veinQ.mul(0.5)))
+        albedo.assign(mix(albedo, albedo.mul(vec3(1.3, 1.25, 1.0)), back.mul(0.6)))
+        If(kind.greaterThan(6.5).and(kind.lessThan(7.5)), () => {
+          albedo.assign(mix(albedo.mul(1.1), vec3(0.9, 0.7, 0.2), veinQ.mul(0.6)))
+        })
+      }).Else(() => {
+        albedo.mulAssign(0.85)
+      })
+      const sh0 = townShadow(wp, N)
+      const col = townLight(albedo, N, ao, select(leafy, leafShadow(sh0), sh0), 'tree').toVar()
+      col.addAssign(albedo.mul(uniforms.uNightAmb).mul(1.3))
+      const breath = sin(t.mul(0.55)).mul(0.38).add(0.62)
+      const flow = sin(vUv.y.mul(9.0).sub(t.mul(1.3)).add(vSeed.mul(20.0))).mul(0.4).add(0.6)
+      const glow = mix(vec3(0.55, 1.0, 0.32), vec3(0.95, 1.0, 0.5), veinQ)
+      col.addAssign(paintEmit(glow.mul(veinQ.mul(0.9).mul(flow).add(0.01)).mul(vCol.a).mul(uniforms.uVein).mul(breath).mul(select(leafy, float(1.0), float(0.0)))))
+      return outdoorHaze(col, wp)
+    }
     If(leafy, () => {
       // 葉: 付け根は濃く先は明るい・葉脈は明るい・まだら・縁ほど少し黄色い
       albedo.mulAssign(vUv.y.mul(0.35).add(0.75))

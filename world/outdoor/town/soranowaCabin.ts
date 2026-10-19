@@ -41,6 +41,8 @@ import { GeoBuilder } from '../site/builder'
 import { townLight } from './facades'
 import { townLamps } from './lamps'
 import { townShadow } from './shadows'
+import { markPaint, paintEmit, paintFlat } from '../paint'
+import { cabinLight, flatGlass } from '../paintParts'
 
 /**
  * 観覧車ソラノワの細かいゴンドラ（花音が乗る 1 基と、カメラの近くの数基。docs/design/town.md §17）。
@@ -409,8 +411,12 @@ function cabinVaryings() {
 export function createCabinMaterial() {
   const u = outdoorUniforms
   // 中の面と外の面の向きを取り違えても欠けないように両面（裏から見た面は法線を返す）
-  const m = unlit('soranowaCabin', { side: THREE.DoubleSide })
+  const m = markPaint(unlit('soranowaCabin', { side: THREE.DoubleSide }), 'light')
   const v = cabinVaryings()
+  if (paintFlat()) {
+    m.colorNode = flatCabinColor(v)
+    return withUniforms(m, cabinUniforms)
+  }
   m.colorNode = Fn(() => {
     const wp = positionWorld.toVar()
     const N = normalize(normalWorld).toVar() // 両面: normalWorld は裏の面で反転済み（MeshBasicNodeMaterial の setupNormal）
@@ -532,11 +538,80 @@ export function createCabinMaterial() {
   return withUniforms(m, cabinUniforms)
 }
 
+/**
+ * 外の塗り（paint.ts）の flat のときのゴンドラの面: むら・織りの目・つやの照り返し・映り込みを省き、材質の番号ごとの平らな色を、
+ * 外は面の光の式・中は中の光の式（天井の灯りと窓から入る空の光）で塗る。灯りは光る物の色の式（emit）に通す
+ */
+function flatCabinColor(v: ReturnType<typeof cabinVaryings>) {
+  const u = outdoorUniforms
+  return Fn(() => {
+    const wp = positionWorld.toVar()
+    const N = normalize(normalWorld).toVar()
+    const Nl = normalize(v.localN).mul(faceDirection).toVar()
+    const local = v.local.toVar()
+    const id = floor(v.mat.x.add(0.5)).toVar()
+    const albedo = vec3(v.color).toVar()
+    const metal = float(0.0).toVar()
+    const emit = vec3(0.0).toVar()
+    const inside = cabInside(local).toVar()
+    const lampOn = v.info.x.toVar()
+    const dist = length(cameraPosition.sub(wp)).toVar()
+    If(id.greaterThan(2.5).and(id.lessThan(3.5)).or(id.greaterThan(7.5)), () => {
+      metal.assign(1.0)
+    })
+      .ElseIf(id.greaterThan(4.5).and(id.lessThan(5.5)), () => {
+        const k = floor(fract(v.info.y.mul(5.0).add(0.01)).mul(5.0)).toVar()
+        albedo.assign(
+          select(
+            k.lessThan(0.5),
+            vec3(0.62, 0.16, 0.14),
+            select(k.lessThan(1.5), vec3(0.14, 0.3, 0.52), select(k.lessThan(2.5), vec3(0.62, 0.5, 0.12), select(k.lessThan(3.5), vec3(0.16, 0.42, 0.26), vec3(0.55, 0.3, 0.42)))),
+          ),
+        )
+      })
+      .ElseIf(id.greaterThan(5.5).and(id.lessThan(6.5)), () => {
+        albedo.assign(v.color.mul(0.55))
+        emit.assign(v.color.mul(lampOn.mul(3.2).add(0.15)))
+      })
+    const ao = select(inside, select(Nl.y.lessThan(-0.5), 0.8, 1.0), 1.0)
+    const sh = townShadow(wp, N).toVar()
+    // 中の照度: 天井の灯り（局所）と、四方の窓から入る空の光
+    const Lv = CAB_LAMP.sub(local).toVar()
+    const d2 = dot(Lv, Lv).toVar()
+    const ndl = max(dot(Nl, Lv.mul(inverseSqrt(max(d2, 1e-4)))), 0.0)
+    const E = CAB_LAMP_C.mul(lampOn).mul(ndl.mul(0.75).add(0.25)).div(d2.mul(1.4).add(0.35)).add(u.uSkyLight.mul(0.6)).add(u.uSunLight.mul(0.08))
+    const amb = u.uSkyLight.mul(0.45).add(CAB_LAMP_C.mul(lampOn).mul(0.12))
+    const col = cabinLight(albedo.mul(metal.mul(-0.6).add(1.0)), N, ao, sh, inside, E, amb).toVar()
+    If(inside.not(), () => {
+      col.addAssign(albedo.mul(townLamps(wp, N)).mul(0.45))
+    })
+    col.assign(outdoorHaze(col, wp))
+    col.addAssign(paintEmit(emit).mul(exp(dist.negate().div(u.uHazeDist.mul(1.5)))))
+    return col
+  })()
+}
+
 /** 細かいゴンドラのガラス（透ける。空・夜の LED・中の灯りを映す。TSL） */
 export function createCabinGlassMaterial() {
   const u = outdoorUniforms
-  const m = unlit('soranowaCabinGlass', { transparent: true, depthWrite: false, side: THREE.DoubleSide })
+  const m = markPaint(unlit('soranowaCabinGlass', { transparent: true, depthWrite: false, side: THREE.DoubleSide }), 'window')
   const v = cabinVaryings()
+  if (paintFlat()) {
+    // 外の塗り（paint.ts）の flat: 透けるガラスの式（映り込み・LED の映り・太陽のきらめきは描かない）
+    const g = Fn(() => {
+      const wp = positionWorld.toVar()
+      const N = normalize(normalWorld).toVar()
+      const V = normalize(cameraPosition.sub(wp)).toVar()
+      If(dot(N, V).lessThan(0.0), () => {
+        N.assign(N.negate())
+      })
+      const room = vec3(0.86, 0.84, 0.8).mul(v.info.x).mul(0.32)
+      const c = flatGlass(N, V, wp, room, v.camIn.greaterThan(0.5)).toVar()
+      return vec4(outdoorHaze(c.rgb, wp), c.a)
+    })()
+    m.colorNode = g
+    return withUniforms(m, cabinUniforms)
+  }
   m.colorNode = Fn(() => {
     const wp = positionWorld.toVar()
     const N = normalize(normalWorld).toVar()

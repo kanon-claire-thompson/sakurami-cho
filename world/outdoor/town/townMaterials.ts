@@ -50,7 +50,7 @@ import {
 import { SITE } from '../../../core/town'
 import { sharedTime } from '../../materials/shared'
 import { oHash, oNoise, outdoorHaze, outdoorUniforms, skyColor, unlit, withUniforms } from '../materials'
-import { outdoorPaint, paintFlat } from '../paint'
+import { markPaint, outdoorPaint, paintEmit, paintFlat } from '../paint'
 import { bayTarget, dirtOf, facadeType, hasFlag, near, occupancy, roomInterior, townLight, wallLayer, windowHash } from './facades'
 import { depthMaterial, townShadow } from './shadows'
 import { siteLight } from '../site/siteMaterial'
@@ -179,7 +179,7 @@ const GLY = { grass: 0, dirt: 1, cobble: 3, slab: 4, asphalt: 5, meadow: 7 } as 
 /** 地形（頂点は標高を入れたシーンの座標、法線は高さ画像から）。色は地面の画像 */
 export function createGroundMaterial() {
   const uniforms = { uTownGlow: uniform(0), uGroundDetail: uniform(200), uHole: groundHole }
-  const m = unlit('townGround')
+  const m = markPaint(unlit('townGround'), 'light')
   // 法線は頂点のまま（ローカル。地形の物は動かさない）を補間する
   const vNormal = varying(attribute<'vec3'>('normal', 'vec3'))
   const tex = townTextureUniforms
@@ -326,7 +326,7 @@ export function createGroundMaterial() {
  */
 export function createWaterMaterial(sea: boolean) {
   const uniforms = { uTownGlow: uniform(0) }
-  const m = unlit(sea ? 'townSea' : 'townWater')
+  const m = markPaint(unlit(sea ? 'townSea' : 'townWater'), 'water')
   m.colorNode = Fn(() => {
     const u = outdoorUniforms
     const wp = positionWorld.toVar()
@@ -1150,7 +1150,7 @@ function roofSurface(s: Surf, dist: F, ctx: BuildingCtx) {
 /** 建物のシェーダー（instanced = 型 × インスタンス、false = 形のある建物） */
 export function createTownBuildingMaterial(instanced: boolean) {
   const uniforms = { ...windowLights, uLightGain: uniform(1), uInterior: uniform(1), uPropsCenter: propsCenter }
-  const m = unlit(instanced ? 'townBuildings' : 'townCustomBuildings')
+  const m = markPaint(unlit(instanced ? 'townBuildings' : 'townCustomBuildings'), 'light')
   const v = buildingVertexOf(instanced)
   if (v.position) m.positionNode = v.position
   // 位置は頂点で 1 回（シーンの座標。形のある建物は物の行列を掛けた位置）
@@ -1231,7 +1231,7 @@ export function createTownBuildingMaterial(instanced: boolean) {
     col.assign(mix(col, s.glassCol, s.glass))
     col.assign(mix(col, townLight(s.overCol, N, s.ao, sh, 'prop'), s.over))
     col.assign(outdoorHaze(col, wp))
-    col.addAssign(s.emit.mul(uniforms.uLightGain).mul(exp(dist.negate().div(u.uHazeDist.mul(1.5)))))
+    col.addAssign(paintEmit(s.emit.mul(uniforms.uLightGain)).mul(exp(dist.negate().div(u.uHazeDist.mul(1.5)))))
     return col
   })()
   return withUniforms(m, uniforms)
@@ -1292,6 +1292,7 @@ export function createWindowSprites(all: InstanceSet) {
   const slots = uniformArray(SPRITE_SLOTS, 'vec4')
   const m = new THREE.PointsNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: false, fog: false })
   m.name = 'townWindowSprites'
+  markPaint(m, 'glow')
 
   const idx = int(instanceIndex)
   const b = idx.div(SPRITES_PER_BUILDING).toVar()

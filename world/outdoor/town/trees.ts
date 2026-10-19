@@ -44,7 +44,7 @@ import { townLight } from './facades'
 import { depthMaterial, townShadow } from './shadows'
 import { townTextureUniforms } from './townTextures'
 import { townLampsEx } from './lamps'
-import { paintFlat } from '../paint'
+import { markPaint, paintEmit, paintFlat } from '../paint'
 import type { TownTile } from './townData'
 import { LANE_CORRIDOR_HALF_W, laneCorridor, type CorridorHit } from '../../walk/laneCorridor'
 
@@ -345,9 +345,10 @@ export function createTreeMaterials() {
       const hsh = oHash(cell.xz.add(cell.y.mul(17.31)).add(seed.mul(31.0)))
       const ctr = vec3(oHash(cell.xz.add(3.7).add(cell.y)), oHash(cell.zx.add(9.1).add(cell.y)), oHash(cell.xz.mul(1.3).add(5.3).add(cell.y))).mul(0.6).add(0.2)
       const r = length(g.sub(cell).sub(ctr))
-      const sp = step(0.8, hsh).mul(smoothstep(0.06, 0.2, r).oneMinus())
+      // 外の塗り（paint.ts）の flat: 光の点は縁のくっきりした丸（光る物の色の式 emit に通す）
+      const sp = step(0.8, hsh).mul(paintFlat() ? smoothstep(0.12, 0.125, r).oneMinus() : smoothstep(0.06, 0.2, r).oneMinus())
       const flow = sin(wp.y.mul(1.4).sub(t.mul(1.1)).add(seed.mul(12.0))).mul(0.45).add(0.55)
-      c.addAssign(vec3(0.55, 1.0, 0.32).mul(sp.mul(1.2).mul(flow).add(0.008)).mul(uniforms.uVein).mul(breath))
+      c.addAssign(paintEmit(vec3(0.55, 1.0, 0.32).mul(sp.mul(1.2).mul(flow).add(0.008)).mul(uniforms.uVein).mul(breath)))
     })
     return c
   }
@@ -411,7 +412,7 @@ export function createTreeMaterials() {
   const vUv = varying(aUv)
   const vAo = varying(aCrown.w)
 
-  const near = unlit('townTreesNear', { side: THREE.DoubleSide, alphaToCoverage: true })
+  const near = markPaint(unlit('townTreesNear', { side: THREE.DoubleSide, alphaToCoverage: true }), 'light')
   near.positionNode = nearPosition
   near.colorNode = Fn(() => {
     const flat = paintFlat()
@@ -486,7 +487,7 @@ export function createTreeMaterials() {
   const kind = iB.y
   const vCell = varying(select(kind.greaterThan(2.5), float(3.0), select(kind.greaterThan(0.5).and(kind.lessThan(1.5)), float(2.0), select(fract(iB.w.mul(7.7)).lessThan(0.5), float(0.0), float(1.0)))))
 
-  const far = unlit('townTreesFar', { side: THREE.DoubleSide, alphaToCoverage: true })
+  const far = markPaint(unlit('townTreesFar', { side: THREE.DoubleSide, alphaToCoverage: true }), 'light')
   far.positionNode = farPosition
   far.colorNode = Fn(() => {
     const wp = positionWorld.toVar()

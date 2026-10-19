@@ -49,7 +49,7 @@ import { roomInterior, townLight } from '../town/facades'
 import { townShadow } from '../town/shadows'
 import { townTextureUniforms } from '../town/townTextures'
 import { townLampsEx } from '../town/lamps'
-import { outdoorPaint, paintFlat } from '../paint'
+import { markPaint, outdoorPaint, paintEmit, paintFlat } from '../paint'
 
 type Node<T = unknown> = THREE.Node<T>
 type F = Node<'float'>
@@ -606,7 +606,7 @@ export function namedSurface(v: SurfaceInputs, interior?: (s: SurfaceState) => v
 /** 名前のある建物の細かい形のシェーダー */
 export function createNamedMaterial() {
   const u = outdoorUniforms
-  const m = unlit('namedSurfaces', { side: THREE.DoubleSide })
+  const m = markPaint(unlit('namedSurfaces', { side: THREE.DoubleSide }), 'light')
   const v = surfaceVaryings()
   m.colorNode = Fn(() => {
     const wp = v.world
@@ -688,7 +688,7 @@ const envRefl = Fn(([R]: [V3]) => {
 export function createNamedGlassMaterial() {
   const u = outdoorUniforms
   const nu = namedUniforms
-  const m = unlit('namedGlass')
+  const m = markPaint(unlit('namedGlass'), 'window')
   const vNormal = varying(normalize(modelWorldMatrix.mul(vec4(normalLocal, 0.0)).xyz))
   const vColor = varying(attribute<'vec3'>('color', 'vec3'))
   const vWin = varying(attribute<'vec4'>('aWin', 'vec4'))
@@ -879,7 +879,7 @@ export function createNamedGlassMaterial() {
 export function createNamedSignMaterial(atlas: THREE.Texture) {
   const nu = namedUniforms
   const uniforms = { uAtlas: texture(atlas) }
-  const m = unlit('namedSigns', { side: THREE.DoubleSide, transparent: false })
+  const m = markPaint(unlit('namedSigns', { side: THREE.DoubleSide, transparent: false }), 'light')
   const vNormal = varying(normalize(modelWorldMatrix.mul(vec4(normalLocal, 0.0)).xyz))
   const vUv = varying(attribute<'vec2'>('aUv', 'vec2'))
   const vSign = varying(attribute<'vec2'>('aSign', 'vec2'))
@@ -892,17 +892,18 @@ export function createNamedSignMaterial(atlas: THREE.Texture) {
     })
     const albedo = pow(max(t.rgb, 0.0), vec3(2.2)).mul(0.9).toVar()
     const sh = townShadow(wp, N)
-    const col = townLight(albedo, N, float(1.0), sh).toVar()
+    const col = townLight(albedo, N, float(1.0), sh, 'prop').toVar()
     col.addAssign(albedo.mul(namedLamps(wp, N)))
     const mode = floor(vSign.x.add(0.5)).toVar()
+    // 光る分は外の塗りの光る物の色（emit）に通す（入れていなければ前のまま）
     If(mode.greaterThan(0.5).and(mode.lessThan(1.5)), () => {
-      col.addAssign(albedo.mul(nu.uShop).mul(2.2).mul(nu.uLightGain))
+      col.addAssign(paintEmit(albedo.mul(nu.uShop).mul(2.2).mul(nu.uLightGain)))
     })
       .ElseIf(mode.greaterThan(1.5).and(mode.lessThan(2.5)), () => {
-        col.addAssign(albedo.mul(vec3(1.0, 0.82, 0.6)).mul(nu.uShop).mul(0.9))
+        col.addAssign(paintEmit(albedo.mul(vec3(1.0, 0.82, 0.6)).mul(nu.uShop).mul(0.9)))
       })
       .ElseIf(mode.greaterThan(2.5), () => {
-        col.addAssign(albedo.mul(vec3(1.0, 0.93, 0.8)).mul(nu.uClock).mul(1.4))
+        col.addAssign(paintEmit(albedo.mul(vec3(1.0, 0.93, 0.8)).mul(nu.uClock).mul(1.4)))
       })
     return outdoorHaze(col, wp)
   })()
@@ -913,7 +914,8 @@ export function createNamedSignMaterial(atlas: THREE.Texture) {
 export function createNamedGlowMaterial() {
   const u = outdoorUniforms
   const nu = namedUniforms
-  const m = unlit('namedGlow')
+  const m = markPaint(unlit('namedGlow'), 'glow')
+  const paint = outdoorPaint()
   const vNormal = varying(normalize(modelWorldMatrix.mul(vec4(normalLocal, 0.0)).xyz))
   const vColor = varying(attribute<'vec3'>('color', 'vec3'))
   const vGlow = varying(attribute<'vec2'>('aMat', 'vec2'))
@@ -922,8 +924,10 @@ export function createNamedGlowMaterial() {
     const on = select(k.lessThan(0.5), nu.uNLampOn, select(k.lessThan(1.5), nu.uShop, select(k.lessThan(2.5), nu.uWindows, nu.uClock)))
     const N = normalize(vNormal)
     // 昼は乳白のガラス・紙の色（空の光）、夜は光る
-    const day = vColor.mul(0.55).mul(u.uSkyLight.mul(0.7).add(u.uSunLight.mul(0.12).mul(max(dot(N, u.uSunDir), 0.0))).add(0.02))
-    const col = mix(day, vColor.mul(vGlow.y).mul(nu.uLightGain), on)
+    const day = paint?.light
+      ? paint.light(vColor.mul(0.55), N, float(1.0), float(1.0), 'prop')
+      : vColor.mul(0.55).mul(u.uSkyLight.mul(0.7).add(u.uSunLight.mul(0.12).mul(max(dot(N, u.uSunDir), 0.0))).add(0.02))
+    const col = mix(day, paintEmit(vColor.mul(vGlow.y).mul(nu.uLightGain)), on)
     return outdoorHaze(col, positionWorld)
   })()
   return m

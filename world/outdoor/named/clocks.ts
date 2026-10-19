@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { outdoor } from '../../environment/daylight'
 import type { ClockSpec } from './kit'
+import { markPaint } from '../paint'
 
 /**
  * 時計の針（駅の時計塔・時計店の吊り時計）。文字盤は看板のアトラスの絵、針は黒い板で、町の時刻（outdoor.time）を指す。
@@ -23,7 +24,8 @@ export function createClockHands(c: ClockSpec) {
   const hand = (len: number, w: number, dz: number) => {
     const g = new THREE.PlaneGeometry(w, len * 1.18).translate(0, len * 0.41, dz)
     const pivot = new THREE.Group()
-    pivot.add(new THREE.Mesh(g, HAND_MAT))
+    // 外の塗りを入れていれば、針は平らな色の物の印（監査が読む。描き方は変わらない）
+    pivot.add(new THREE.Mesh(g, markPaint(HAND_MAT, 'flat')))
     root.add(pivot)
     return pivot
   }

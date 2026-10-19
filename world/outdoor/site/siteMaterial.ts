@@ -43,7 +43,7 @@ import { DOOR, SHELL } from '../../../core/site'
 import { ENTRANCE, ROOM } from '../../../core/lab/plan'
 import { townOptions } from '../../townHost'
 import { colorUniform, oHash, oNoise, outdoorHaze, outdoorUniforms, skyColor, unlit } from '../materials'
-import { paintFlat } from '../paint'
+import { markPaint, outdoorPaint, paintFlat } from '../paint'
 import { townLight } from '../town/facades'
 import { townShadow } from '../town/shadows'
 import { townTextureUniforms } from '../town/townTextures'
@@ -179,7 +179,7 @@ const layerNrm = (s: Layers, uv: THREE.Node<'vec2'>, layer: number) => s.sample(
 /** ラボの外観とセットの形のシェーダー（1 つ。質感の種類は頂点の aMat） */
 export function createSiteMaterial(anisotropy = 8) {
   loadLabTextures(anisotropy)
-  const m = unlit('siteSurfaces')
+  const m = markPaint(unlit('siteSurfaces'), 'light')
   const vColor = varying(attribute<'vec3'>('color', 'vec3'))
   const vMat = varying(attribute<'vec2'>('aMat', 'vec2'))
   const tex = townTextureUniforms
@@ -383,8 +383,25 @@ export function createSiteMaterial(anisotropy = 8) {
  * 部屋の中からは裏なので描かない（片面）
  */
 export function createSiteGlassMaterial() {
-  const m = unlit('siteGlass', { transparent: true, depthWrite: false })
+  const m = markPaint(unlit('siteGlass', { transparent: true, depthWrite: false }), 'window')
   const ou = outdoorUniforms
+  const glass = paintFlat() ? outdoorPaint()?.glass : undefined
+  if (glass) {
+    // 外の塗り（paint.ts）の flat: 透けるガラスは塗りの式（映り込み・太陽のきらめき・くもりは描かない）
+    const g = Fn(() => {
+      const wp = positionWorld.toVar()
+      const N = normalize(normalWorldGeometry).toVar()
+      const V = normalize(cameraPosition.sub(wp)).toVar()
+      If(dot(N, V).lessThan(0.0), () => {
+        N.assign(N.negate())
+      })
+      const c = glass(N, V, wp, vec3(0.0)).toVar()
+      return vec4(outdoorHaze(c.rgb, wp), c.a)
+    })()
+    m.colorNode = g.xyz
+    m.opacityNode = g.w
+    return m
+  }
   const col = Fn(() => {
     const wp = positionWorld.toVar()
     // 両面で使う所がある（中のある建物の扉・大庇）。normalWorld は裏の面で反転済みなので、裏の判定は反転していない幾何の法線で
@@ -416,7 +433,7 @@ export function createSiteGlassMaterial() {
 
 /** 光る物（外のネオン・街灯の灯具・足元灯）の色。strength は毎コマ変える（夜に強く） */
 export function createSiteGlowMaterial(color: THREE.ColorRepresentation) {
-  const m = new THREE.MeshBasicMaterial({ color, toneMapped: false, fog: false })
+  const m = markPaint(new THREE.MeshBasicMaterial({ color, toneMapped: false, fog: false }), 'glow')
   m.userData.base = new THREE.Color(color)
   return m
 }

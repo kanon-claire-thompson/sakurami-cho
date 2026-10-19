@@ -24,6 +24,7 @@ import {
   select,
   sin,
   smoothstep,
+  step,
   uniform,
   uv,
   varying,
@@ -33,6 +34,7 @@ import {
 } from 'three/tsl'
 import { oNoise, outdoorHaze, outdoorUniforms, skyColor, unlit, withUniforms } from '../../materials'
 import { townShadow } from '../../town/shadows'
+import { markPaint, outdoorPaint, paintEmit, paintFlat } from '../../paint'
 
 /**
  * ガーデンドームの水（池の水面・大滝「天の水」と回廊から落ちる細い滝・滝つぼのしぶき）と、雲霧林の霧（噴霧装置）。
@@ -50,7 +52,26 @@ export function createPoolMaterial() {
   const uniforms = { uVein: uniform(0), uFoam: uniform(new THREE.Vector4(0, 0, 0, 0)), uNightAmb: uniform(new THREE.Vector3()) }
   const u = outdoorUniforms
   const vUv = varying(attribute<'vec2'>('aUv', 'vec2'))
-  const m = unlit('domePool')
+  const m = markPaint(unlit('domePool'), 'water')
+  const water = paintFlat() ? outdoorPaint()?.water : undefined
+  if (water) {
+    // 外の塗り（paint.ts）の flat: 水面は塗りの水の式（川・池の色。夜の中の灯りと葉脈の光の映りは灯りの映りとして渡す）、泡は形のくっきりした白
+    m.colorNode = Fn(() => {
+      const wp = positionWorld.toVar()
+      const p = wp.xz.toVar()
+      const t = u.uTime
+      const V = normalize(cameraPosition.sub(wp)).toVar()
+      const breath = sin(t.mul(0.55)).mul(0.38).add(0.62)
+      const lamps = uniforms.uNightAmb.mul(0.6).add(paintEmit(vec3(0.55, 1.0, 0.32).mul(uniforms.uVein).mul(breath).mul(0.12)))
+      const col = water(vec3(0.0, 1.0, 0.0), V, wp, false, lamps).toVar()
+      const df = length(p.sub(uniforms.uFoam.xy))
+      const foamK = smoothstep(uniforms.uFoam.w.mul(0.3), uniforms.uFoam.w.mul(1.6), df).oneMinus()
+      const foam = step(0.62, oNoise(p.mul(3.0).add(vec2(t.mul(0.9), t.mul(-0.7)))).mul(0.7).add(foamK.mul(0.4))).mul(foamK)
+      col.assign(mix(col, vec3(0.75, 0.8, 0.8).mul(u.uSkyLight.mul(1.2).add(u.uSunLight.mul(0.35)).add(uniforms.uNightAmb.mul(2.0)).add(0.02)), foam.mul(0.85)))
+      return outdoorHaze(col, wp)
+    })()
+    return withUniforms(m, uniforms)
+  }
   m.colorNode = Fn(() => {
     const wp = positionWorld.toVar()
     const p = wp.xz.toVar()
@@ -128,7 +149,8 @@ export function createFallMaterial() {
   const uniforms = { uNightAmb: uniform(new THREE.Vector3()), uVein: uniform(0) }
   const o = outdoorUniforms
   const vUv = varying(attribute<'vec3'>('aUv', 'vec3'))
-  const m = unlit('domeFalls', { transparent: true, depthWrite: false, side: THREE.DoubleSide })
+  const m = markPaint(unlit('domeFalls', { transparent: true, depthWrite: false, side: THREE.DoubleSide }), 'water')
+  const flat = paintFlat()
   m.colorNode = Fn(() => {
     const u = vUv.x.toVar()
     const v = vUv.y.toVar()
@@ -141,7 +163,8 @@ export function createFallMaterial() {
     const s1 = oNoise(vec2(w1, y.mul(0.18).sub(t.mul(speed).mul(0.18))))
     const s2 = oNoise(vec2(u.mul(47.0).add(3.0), y.mul(0.5).sub(t.mul(speed).mul(0.5)))).toVar()
     const s3 = oNoise(vec2(u.mul(110.0).add(7.0), y.mul(1.6).sub(t.mul(speed).mul(1.6))))
-    const streak = smoothstep(0.42, 0.9, s1.mul(0.55).add(s2.mul(0.3)).add(s3.mul(0.15))).toVar()
+    // 外の塗り（paint.ts）の flat: 筋は 2 段の平らな白（細かい筋の 3 つ目は使わない）
+    const streak = (flat ? smoothstep(0.5, 0.53, s1.mul(0.65).add(s2.mul(0.35))).mul(0.6).add(smoothstep(0.66, 0.69, s1.mul(0.65).add(s2.mul(0.35))).mul(0.4)) : smoothstep(0.42, 0.9, s1.mul(0.55).add(s2.mul(0.3)).add(s3.mul(0.15)))).toVar()
     const edge = smoothstep(0.0, 0.18, u).mul(smoothstep(0.82, 1.0, u).oneMinus()).toVar()
     const ragged = smoothstep(0.0, 0.35, s2.sub(0.25).add(float(0.5).sub(abs(u.sub(0.5))).mul(1.6)))
     const a = streak.mul(0.7).add(0.12).mul(edge).mul(mix(1.0, ragged, 0.6)).toVar()
@@ -151,7 +174,7 @@ export function createFallMaterial() {
     const light = o.uSkyLight.mul(1.1).add(o.uSunLight.mul(0.35)).add(uniforms.uNightAmb.mul(2.5)).add(vec3(0.008))
     const col = base.mul(light).mul(streak.mul(0.5).add(0.7)).toVar()
     const breath = sin(t.mul(0.55)).mul(0.38).add(0.62)
-    col.addAssign(vec3(0.55, 1.0, 0.32).mul(uniforms.uVein).mul(breath).mul(0.12).mul(streak))
+    col.addAssign(paintEmit(vec3(0.55, 1.0, 0.32).mul(uniforms.uVein).mul(breath).mul(0.12).mul(streak)))
     return vec4(outdoorHaze(col, positionWorld), clamp(a, 0.0, 0.92))
   })()
   return withUniforms(m, uniforms)
@@ -252,6 +275,8 @@ export function createMistMaterial(attrs: MistAttributes) {
   const depth = Fn(() => modelViewMatrix.mul(vec4(p, 1.0)).z.negate())()
   const m = new THREE.PointsNodeMaterial({ transparent: true, depthWrite: false, sizeAttenuation: false, fog: false })
   m.name = 'domeMist'
+  markPaint(m, 'flat')
+  const flat = paintFlat()
   m.positionNode = p
   m.sizeNode = clamp(aMist.x.mul(uniforms.uPx).div(max(depth, 0.5)), 1.0, 900.0).div(screenDPR)
   const vA = varying(
@@ -269,7 +294,8 @@ export function createMistMaterial(attrs: MistAttributes) {
     If(r2.greaterThan(1.0), () => {
       Discard()
     })
-    const a = r2.oneMinus().mul(r2.oneMinus()).mul(vA).mul(uniforms.uMist)
+    // 外の塗り（paint.ts）の flat: 粒は縁のくっきりした丸（2 段のうすさ）
+    const a = (flat ? smoothstep(0.55, 0.6, r2).oneMinus().mul(0.35).add(smoothstep(0.15, 0.2, r2).oneMinus().mul(0.25)) : r2.oneMinus().mul(r2.oneMinus())).mul(vA).mul(uniforms.uMist)
     const col = vec3(0.86, 0.9, 0.92).mul(o.uSkyLight.mul(1.1).add(o.uSunLight.mul(0.25)).add(uniforms.uNightAmb.mul(2.2)).add(0.01))
     return vec4(outdoorHaze(col, positionWorld), a)
   })()

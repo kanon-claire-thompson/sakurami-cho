@@ -40,7 +40,7 @@ import {
 import { oHash, oNoise, outdoorHaze, outdoorUniforms, skyColor, unlit, withUniforms } from '../materials'
 import { arrayUniform, bAlb, bNrm, namedSurface, surfaceVaryings, type SurfaceState } from '../named/namedMaterial'
 import { shadowTap, townShadow, townShadowUniforms } from '../town/shadows'
-import { outdoorPaint } from '../paint'
+import { markPaint, outdoorPaint, paintEmit, paintFlat } from '../paint'
 
 type Node<T = unknown> = THREE.Node<T>
 type F = Node<'float'>
@@ -432,7 +432,7 @@ function interiorLight(u: InteriorUniforms) {
 
 /** 中の面と家具 */
 export function createInteriorSurfaceMaterial(u: InteriorUniforms) {
-  const m = unlit('interiorSurfaces', { side: THREE.FrontSide })
+  const m = markPaint(unlit('interiorSurfaces', { side: THREE.FrontSide }), 'interior')
   // 中の面は汚れない（aExt.w は 0）
   const v = surfaceVaryings(0)
   m.colorNode = Fn(() => {
@@ -441,7 +441,7 @@ export function createInteriorSurfaceMaterial(u: InteriorUniforms) {
     const s = namedSurface(v, interiorSurface)
     const V = normalize(cameraPosition.sub(wp))
     const col = L.interiorShade(wp, s.Nd, V, s.albedo, s.ao, s.gloss, s.metal, v.ext.y).toVar()
-    col.addAssign(s.albedo.mul(s.emit).mul(4.0).add(vec3(1.0, 0.85, 0.55).mul(s.emit).mul(0.5)))
+    col.addAssign(paintEmit(s.albedo.mul(s.emit).mul(4.0).add(vec3(1.0, 0.85, 0.55).mul(s.emit).mul(0.5))))
     return outdoorHaze(col, wp)
   })()
   return withUniforms(m, u)
@@ -450,7 +450,7 @@ export function createInteriorSurfaceMaterial(u: InteriorUniforms) {
 /** 光る物（電球・傘・画面の縁の光）。aMat = (灯りの番号, 強さ)。消えているときは昼の色（まわりの明るさ） */
 export function createInteriorGlowMaterial(u: InteriorUniforms) {
   const o = outdoorUniforms
-  const m = unlit('interiorGlow')
+  const m = markPaint(unlit('interiorGlow'), 'glow')
   const v = surfaceVaryings(0)
   m.colorNode = Fn(() => {
     const li = int(clamp(v.mat.x, 0.0, MAX_ILAMP - 1).add(0.5))
@@ -461,7 +461,7 @@ export function createInteriorGlowMaterial(u: InteriorUniforms) {
     If(u.uIGlass.greaterThan(0.5).and(g.equal(0)), () => {
       day.addAssign(v.color.mul(o.uSkyLight.mul(0.55).add(o.uSunLight.mul(max(normalize(v.normal).y, 0.0)).mul(0.12))))
     })
-    const col = mix(day, v.color.mul(v.mat.y), clamp(on, 0.0, 1.0))
+    const col = mix(day, paintEmit(v.color.mul(v.mat.y)), clamp(on, 0.0, 1.0))
     return outdoorHaze(col, v.world)
   })()
   return withUniforms(m, u)
@@ -469,7 +469,7 @@ export function createInteriorGlowMaterial(u: InteriorUniforms) {
 
 /** 絵の板（アトラス）。aPic = (光り方, 組, 環境光の遮り) */
 export function createInteriorPictureMaterial(u: InteriorUniforms, atlas: THREE.Texture) {
-  const m = unlit('interiorPictures')
+  const m = markPaint(unlit('interiorPictures'), 'interior')
   const uAtlas = texture(atlas)
   const vNormal = varying(normalize(modelWorldMatrix.mul(vec4(normalLocal, 0.0)).xyz))
   const vUv = varying(attribute<'vec2'>('aUv', 'vec2'))
@@ -485,7 +485,7 @@ export function createInteriorPictureMaterial(u: InteriorUniforms, atlas: THREE.
     const col = vec3(0.0).toVar()
     If(mode.greaterThan(0.5).and(mode.lessThan(1.5)), () => {
       // 画面: 灯りに関係なく光る。少しの映り込み
-      col.assign(albedo.mul(u.uIScreen).add(L.interiorShade(wp, N, V, vec3(0.02), float(1.0), float(0.8), float(0.0), vPic.y).mul(0.5)))
+      col.assign(paintEmit(albedo.mul(u.uIScreen)).add(L.interiorShade(wp, N, V, vec3(0.02), float(1.0), float(0.8), float(0.0), vPic.y).mul(0.5)))
     }).Else(() => {
       col.assign(L.interiorShade(wp, N, V, albedo.mul(0.92), vPic.z, select(mode.greaterThan(1.5), 0.3, 0.12), float(0.0), vPic.y))
     })
@@ -500,8 +500,26 @@ export function createInteriorPictureMaterial(u: InteriorUniforms, atlas: THREE.
  */
 export function createInteriorGlassMaterial(u: InteriorUniforms) {
   const o = outdoorUniforms
-  const m = unlit('interiorGlass', { transparent: true, depthWrite: false, side: THREE.DoubleSide })
+  const m = markPaint(unlit('interiorGlass', { transparent: true, depthWrite: false, side: THREE.DoubleSide }), 'window')
   const vNormal = varying(normalize(modelWorldMatrix.mul(vec4(normalLocal, 0.0)).xyz))
+  const glass = paintFlat() ? outdoorPaint()?.glass : undefined
+  if (glass) {
+    // 外の塗り（paint.ts）の flat: 外から見るガラスは塗りの式、中から見るガラスは部屋の明るさの平らな映り（映り込み・きらめき・くもりは描かない）
+    m.colorNode = Fn(() => {
+      const wp = positionWorld
+      const N = normalize(vNormal).toVar()
+      const V = normalize(cameraPosition.sub(wp)).toVar()
+      const out = vec4(0.0).toVar()
+      If(dot(N, V).greaterThan(0.0), () => {
+        out.assign(glass(N, V, wp, vec3(0.0)))
+      }).Else(() => {
+        const dark = smoothstep(0.02, 0.4, dot(o.uSkyLight, vec3(0.33))).oneMinus()
+        out.assign(vec4(u.uIRefl, dark.mul(0.1).add(0.08)))
+      })
+      return vec4(outdoorHaze(out.rgb, wp), out.a)
+    })()
+    return withUniforms(m, u)
+  }
   m.colorNode = Fn(() => {
     const alpha = float(0.0).toVar()
     const wp = positionWorld

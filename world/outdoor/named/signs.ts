@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import type { V3 } from './frame'
+import { paintFlat } from '../paint'
 
 /**
  * 看板・表札・時計の文字盤の絵（canvas に描いた 1 枚のアトラス）と、それを貼る面。
@@ -313,7 +314,8 @@ function drawSign(ctx: CanvasRenderingContext2D, x: number, y: number, w: number
       roundRect(ctx, x + 1, y + 1, w - 2, h - 2, m * 0.06)
       ctx.fill()
     }
-    if (s.finish === 'wood') {
+    // 外の塗り（paint.ts）の flat のときは木目を描かない（平らな地の色）
+    if (s.finish === 'wood' && !paintFlat()) {
       // 木目
       ctx.globalAlpha = 0.18
       ctx.strokeStyle = '#000'

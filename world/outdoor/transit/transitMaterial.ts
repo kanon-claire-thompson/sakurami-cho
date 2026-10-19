@@ -55,7 +55,7 @@ import { townLight } from '../town/facades'
 import { townShadow } from '../town/shadows'
 import { townTextureUniforms } from '../town/townTextures'
 import { townLamps } from '../town/lamps'
-import { paintFlat } from '../paint'
+import { markPaint, outdoorPaint, paintEmit, paintFlat } from '../paint'
 
 type Node<T = unknown> = THREE.Node<T>
 
@@ -281,6 +281,9 @@ function transitColor(builder: THREE.NodeBuilder) {
   const u = outdoorUniforms
   const tu = transitUniforms
   const vInfo = instanced ? attribute<'vec4'>('iInfo', 'vec4') : vec4(0.0, 0.0, 0.0, 0.5)
+  // 外の塗り（paint.ts）の flat: 汚れ・むら・質感の写真・車内の奥（インテリアマッピング）・照り返しを省く（窓は塗りの window・光る物は emit）
+  const flat = paintFlat()
+  const paintWindow = flat ? outdoorPaint()?.window : undefined
   return Fn(() => {
     const { rt } = localFrame(builder)
     // 視線を形の局所の座標へ（回転だけ。大きさは 1）
@@ -312,14 +315,22 @@ function transitColor(builder: THREE.NodeBuilder) {
     If(id.lessThan(0.5), () => {
       // 塗装（aux = つや）: 下ほど汚れ
       gloss.assign(aux.mul(0.6).add(0.25))
-      if (instanced) {
+      if (instanced && !flat) {
         const grime = smoothstep(0.3, 1.4, vLocal.y).oneMinus().mul(n1.mul(0.5).add(0.5))
         albedo.mulAssign(grime.mul(-0.28).add(1.0))
       }
-      albedo.mulAssign(oNoise(p.mul(0.4)).mul(0.08).add(0.96))
+      if (!flat) albedo.mulAssign(oNoise(p.mul(0.4)).mul(0.08).add(0.96))
     })
       .ElseIf(id.lessThan(1.5), () => {
         // 窓
+        if (paintWindow) {
+          // 平らな塗り: 窓の式（車内の灯りが点いていれば灯りの色）。窓の中の位置は局所の座標から
+          const lit = info.y.mul(tu.uLampOn).mul(select(aux.lessThan(0.5), 1.0, 0.0))
+          const cell = fract(vec2(select(an.x.greaterThan(an.z), vLocal.z, vLocal.x).mul(0.8), vLocal.y.mul(0.9)))
+          result.assign(outdoorHaze(paintWindow(lit, vec3(1.0, 0.86, 0.66).mul(1.6), N, V, cell), wp))
+          done.assign(1.0)
+          return
+        }
         const Nl = normalize(vLocalN).toVar()
         const rd = normalize(vLocalView).toVar()
         const fres = pow(clamp(dot(N, V).oneMinus(), 0.0, 1.0), 5.0).mul(0.94).add(0.06).toVar()
@@ -344,13 +355,19 @@ function transitColor(builder: THREE.NodeBuilder) {
         // ステンレス・アルミ（細かい筋）
         metal.assign(1.0)
         gloss.assign(0.55)
-        albedo.mulAssign(oNoise(vec2(p.x.mul(0.5), p.y.mul(40.0))).mul(0.1).add(0.9))
+        if (!flat) albedo.mulAssign(oNoise(vec2(p.x.mul(0.5), p.y.mul(40.0))).mul(0.1).add(0.9))
       })
       .ElseIf(id.lessThan(3.5), () => {
         gloss.assign(aux.mul(0.4).add(0.05))
-        albedo.mulAssign(n1.mul(0.15).add(0.85))
+        if (!flat) albedo.mulAssign(n1.mul(0.15).add(0.85))
       })
       .ElseIf(id.lessThan(4.5), () => {
+        if (flat) {
+          // 平らな塗り: 多肉植物と苔の 2 色の塊
+          albedo.assign(mix(vec3(0.035, 0.07, 0.022), vec3(0.09, 0.07, 0.03), smoothstep(0.62, 0.66, oNoise(p.mul(2.7).add(3.0)))))
+          gloss.assign(0.03)
+          return
+        }
         // 屋根庭: 多肉植物と苔のまだら（芝の質感の層を緑と赤茶にまぜる）
         const g = layerAlb(townTextureUniforms.uGndAlb, p.div(1.6), 0)
         const m = oNoise(p.mul(2.7).add(3.0)).toVar()
@@ -387,8 +404,10 @@ function transitColor(builder: THREE.NodeBuilder) {
         gloss.assign(0.9)
       })
       .ElseIf(id.lessThan(8.5), () => {
-        const t = layerAlb(townTextureUniforms.uBldAlb, vec2(p.x.mul(0.5), p.y.mul(0.5)), 0)
-        albedo.mulAssign(mix(vec3(1.0), t, 0.7))
+        if (!flat) {
+          const t = layerAlb(townTextureUniforms.uBldAlb, vec2(p.x.mul(0.5), p.y.mul(0.5)), 0)
+          albedo.mulAssign(mix(vec3(1.0), t, 0.7))
+        }
         gloss.assign(0.15)
       })
       .ElseIf(id.lessThan(9.5), () => {
@@ -399,8 +418,10 @@ function transitColor(builder: THREE.NodeBuilder) {
         gloss.assign(0.3)
       })
       .ElseIf(id.lessThan(10.5), () => {
-        const t = layerAlb(townTextureUniforms.uBldAlb, wuv.div(3.2), 4)
-        albedo.mulAssign(mix(vec3(1.0), vec3(lum(t)).mul(2.0), 0.7))
+        if (!flat) {
+          const t = layerAlb(townTextureUniforms.uBldAlb, wuv.div(3.2), 4)
+          albedo.mulAssign(mix(vec3(1.0), vec3(lum(t)).mul(2.0), 0.7))
+        }
         If(aux.greaterThan(0.01), () => {
           const g = abs(fract(wuv.div(aux).add(0.5)).sub(0.5)).mul(aux)
           const joint = smoothstep(0.004, fwidth(wuv.x).add(0.012), min(g.x, g.y)).oneMinus()
@@ -409,8 +430,10 @@ function transitColor(builder: THREE.NodeBuilder) {
         gloss.assign(0.06)
       })
       .ElseIf(id.lessThan(11.5), () => {
-        const t = layerAlb(townTextureUniforms.uGndAlb, wuv.div(1.2), 2)
-        albedo.mulAssign(mix(vec3(1.0), t.mul(2.0), 0.8))
+        if (!flat) {
+          const t = layerAlb(townTextureUniforms.uGndAlb, wuv.div(1.2), 2)
+          albedo.mulAssign(mix(vec3(1.0), t.mul(2.0), 0.8))
+        }
         gloss.assign(0.04)
       })
       .ElseIf(id.lessThan(12.5), () => {
@@ -431,7 +454,7 @@ function transitColor(builder: THREE.NodeBuilder) {
       })
       .ElseIf(id.lessThan(14.5), () => {
         // 布
-        albedo.mulAssign(oNoise(p.mul(30.0)).mul(0.3).add(0.85))
+        if (!flat) albedo.mulAssign(oNoise(p.mul(30.0)).mul(0.3).add(0.85))
         gloss.assign(0.03)
       })
       .Else(() => {
@@ -459,7 +482,7 @@ function transitColor(builder: THREE.NodeBuilder) {
       // 夜: 町の灯り
       col.addAssign(albedo.mul(townLamps(wp, N)))
       col.assign(outdoorHaze(col, wp))
-      col.addAssign(emit.mul(exp(dist.negate().div(u.uHazeDist.mul(1.5)))))
+      col.addAssign(paintEmit(emit).mul(exp(dist.negate().div(u.uHazeDist.mul(1.5)))))
       result.assign(col)
     })
     return result
@@ -468,7 +491,7 @@ function transitColor(builder: THREE.NodeBuilder) {
 
 /** 交通の物の材質（車両はインスタンス。動かない物は 1 つの形） */
 export function createTransitMaterial() {
-  const m = new ObjectNodeMaterial({ fog: false, side: THREE.FrontSide })
+  const m = markPaint(new ObjectNodeMaterial({ fog: false, side: THREE.FrontSide }), 'light')
   m.name = 'transit'
   m.buildNodes = (mat, builder) => {
     mat.colorNode = transitColor(builder)
@@ -482,7 +505,8 @@ export function createTransitMaterial() {
  */
 export function createWireMaterial(color: THREE.ColorRepresentation) {
   const uniforms = { uColor: colorUniform(new THREE.Color(color)), uPx: uniform(500), uGlow: uniform(0), uGlowColor: colorUniform(new THREE.Color(1, 0.8, 0.5)) }
-  const m = unlit('transitWire', { transparent: true, depthWrite: false, side: THREE.DoubleSide })
+  const m = markPaint(unlit('transitWire', { transparent: true, depthWrite: false, side: THREE.DoubleSide }), 'light')
+  const paint = outdoorPaint()
   const u = outdoorUniforms
   const aOther = attribute<'vec3'>('aOther', 'vec3')
   const aSide = attribute<'float'>('aSide', 'float')
@@ -502,7 +526,10 @@ export function createWireMaterial(color: THREE.ColorRepresentation) {
   const vAlpha = varying(clamp(px.div(1.2), 0.0, 1.0))
   const vWorld = varying(wp0)
   const vAlong = varying(aSide)
-  const col = uniforms.uColor.mul(u.uSkyLight.mul(0.8).add(u.uSunLight.mul(0.35))).add(uniforms.uGlowColor.mul(uniforms.uGlow))
+  // 外の塗り（paint.ts）の light を入れたら、線の色は上向きの面の光（綱の向きは平均）。光る分は emit
+  const col = paint?.light
+    ? paint.light(uniforms.uColor, vec3(0.0, 1.0, 0.0), float(1.0), float(1.0), 'structure').add(paintEmit(uniforms.uGlowColor.mul(uniforms.uGlow)))
+    : uniforms.uColor.mul(u.uSkyLight.mul(0.8).add(u.uSunLight.mul(0.35))).add(uniforms.uGlowColor.mul(uniforms.uGlow))
   m.colorNode = outdoorHaze(col, vWorld)
   m.opacityNode = vAlpha.mul(abs(vAlong).mul(-0.3).add(1.0))
   return withUniforms(m, uniforms)
@@ -552,7 +579,7 @@ export class WireBatch {
 /** 車両の下の丸い影（地面・高架の上。昼は濃く、夜はうすく）。InstancedMesh の 1 枚の板 */
 export function createBlobMaterial() {
   const uniforms = { uStrength: uniform(0.5) }
-  const m = unlit('transitBlob', { transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 })
+  const m = markPaint(unlit('transitBlob', { transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 }), 'flat')
   const q = uv().mul(2.0).sub(1.0)
   // 長い車両の下: 横は狭く、前後は端だけうすく
   const a = smoothstep(0.55, 1.0, abs(q.x)).oneMinus().mul(smoothstep(0.85, 1.0, abs(q.y)).oneMinus())

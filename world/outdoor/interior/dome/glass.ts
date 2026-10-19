@@ -31,6 +31,7 @@ import {
   vec4,
 } from 'three/tsl'
 import { oNoise, outdoorHaze, outdoorUniforms, skyColor, unlit, withUniforms } from '../../materials'
+import { markPaint, outdoorPaint, paintEmit, paintFlat } from '../../paint'
 
 /**
  * ガーデンドームの透けるガラスの半球（中を作っている間、町の不透明なドームの形の代わり）。
@@ -44,7 +45,9 @@ export function createDomeGlassMaterial(ribs = 16, rings = 5) {
   // 法線は前と同じく mat3(modelMatrix) で回す（半球は縦と横で大きさが違うが、前の見た目に合わせる）
   const vNormal = varying(normalize(modelWorldMatrix.mul(vec4(normalGeometry, 0.0)).xyz))
   const vUnit = varying(positionGeometry)
-  const m = unlit('domeGlass', { transparent: true, depthWrite: false, side: THREE.DoubleSide })
+  const m = markPaint(unlit('domeGlass', { transparent: true, depthWrite: false, side: THREE.DoubleSide }), 'window')
+  // 外の塗り（paint.ts）の flat: ガラスは透けるガラスの式（外から）・部屋の明るさの平らな映り（中から）、格子は面の光の式、光は emit。くもり・きらめきは描かない
+  const paint = paintFlat() ? outdoorPaint() : null
   m.colorNode = Fn(() => {
     const wp = positionWorld.toVar()
     // 基壇（床から 3m）より下と、入口の張り出しの中はガラスが無い（局所: s = x、t = -z、高さ = y × 48 − 0.5）
@@ -80,6 +83,22 @@ export function createDomeGlassMaterial(ribs = 16, rings = 5) {
     const fres = pow(clamp(ndv.oneMinus(), 0.0, 1.0), 5.0).mul(0.96).add(0.04).toVar()
     const col = vec3(0.0).toVar()
     const a = float(0.0).toVar()
+    if (paint) {
+      If(outside, () => {
+        const g = (paint.glass ? paint.glass(Nf, V, wp, vec3(0.0)) : vec4(skyColor(vec3(0.0, 0.3, 1.0)).mul(0.6), 0.35)).toVar()
+        col.assign(g.rgb)
+        a.assign(g.a)
+      }).Else(() => {
+        col.assign(uniforms.uInner.add(skyColor(V.negate()).mul(0.06)))
+        a.assign(0.06)
+      })
+      const steel = (paint.light ? paint.light(vec3(0.8, 0.8, 0.78), Nf, float(1.0), float(1.0), 'dome') : vec3(0.8, 0.8, 0.78).mul(o.uSkyLight)).add(vec3(0.8, 0.8, 0.78).mul(uniforms.uInner).mul(1.5)).toVar()
+      const breath = sin(o.uTime.mul(0.55)).mul(0.38).add(0.62)
+      steel.addAssign(paintEmit(vec3(0.7, 0.9, 0.5).mul(uniforms.uDome).mul(0.25).mul(breath)))
+      col.assign(mix(col, steel, bar))
+      a.assign(mix(a, 1.0, bar))
+      return vec4(outdoorHaze(col, wp), a)
+    }
     If(outside, () => {
       const R = reflect(V.negate(), Nf).toVar()
       const refl = skyColor(vec3(R.x, max(R.y, 0.02), R.z)).mul(vec3(0.92, 0.97, 1.0))

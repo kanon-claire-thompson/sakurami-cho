@@ -41,6 +41,7 @@ import { depthMaterial, townShadow } from './shadows'
 import { townTextureUniforms } from './townTextures'
 import { townLamps, LAMP, type Lamp } from './lamps'
 import type { TownTile } from './townData'
+import { markPaint, paintEmit, paintFlat } from '../paint'
 
 /**
  * 建物の小物（形で描く）。外壁のシェーダーの模様だけでは平らに見える所に、厚みのある物を足す。
@@ -475,7 +476,9 @@ export function createPropMaterials() {
   const vColor = varying(pC)
   const vLN = varying(normalGeometry)
 
-  const material = unlit('townProps', { side: THREE.DoubleSide })
+  const material = markPaint(unlit('townProps', { side: THREE.DoubleSide }), 'light')
+  // 外の塗り（paint.ts）の flat: コンクリート・漆喰の質感と金属の照り返しを省く（形の模様は残す）
+  const flat = paintFlat()
   material.positionNode = positionNode
   material.colorNode = Fn(() => {
     const wp = positionWorld.toVar()
@@ -490,8 +493,10 @@ export function createPropMaterials() {
     const fine = smoothstep(30.0, 120.0, dist).oneMinus().toVar()
     If(kind.lessThan(0.5).or(kind.greaterThan(9.5)), () => {
       // コンクリートの床の板・仕切り: コンクリートの質感
-      const t = townTextureUniforms.uBldAlb.sample(vec2(m.x.add(m.z), m.y).div(3.2)).depth(int(4)).rgb.mul(2.0)
-      albedo.mulAssign(pow(max(t, 0.0), vec3(2.2)))
+      if (!flat) {
+        const t = townTextureUniforms.uBldAlb.sample(vec2(m.x.add(m.z), m.y).div(3.2)).depth(int(4)).rgb.mul(2.0)
+        albedo.mulAssign(pow(max(t, 0.0), vec3(2.2)))
+      }
       If(N.y.lessThan(-0.5), () => {
         ao.assign(0.6)
       })
@@ -548,22 +553,24 @@ export function createPropMaterials() {
       })
       .ElseIf(kind.greaterThan(7.5).and(kind.lessThan(8.5)), () => {
         // 塔屋: 外壁の質感（漆喰）と扉
-        const t = townTextureUniforms.uBldAlb.sample(vec2(m.x.add(m.z), m.y).div(3.0)).depth(int(1)).rgb.mul(2.0)
-        albedo.mulAssign(pow(max(t, 0.0), vec3(2.2)))
+        if (!flat) {
+          const t = townTextureUniforms.uBldAlb.sample(vec2(m.x.add(m.z), m.y).div(3.0)).depth(int(1)).rgb.mul(2.0)
+          albedo.mulAssign(pow(max(t, 0.0), vec3(2.2)))
+        }
         If(vLN.z.greaterThan(0.5).and(abs(m.x.sub(vSize.x.mul(0.5))).lessThan(0.45)).and(m.y.lessThan(2.1)), () => {
           albedo.assign(vec3(0.18, 0.19, 0.2))
         })
         ao.assign(mix(0.7, 1.0, smoothstep(0.0, 1.0, m.y)))
       })
     const sh = townShadow(wp, N).toVar()
-    const col = townLight(albedo, N, ao, sh).toVar()
+    const col = townLight(albedo, N, ao, sh, 'prop').toVar()
     col.addAssign(albedo.mul(townLamps(wp, N)).mul(ao))
     // 金属の照り返し
-    If(kind.greaterThan(0.5).and(kind.lessThan(2.5)).or(kind.greaterThan(4.5).and(kind.lessThan(7.5))), () => {
+    if (!flat) If(kind.greaterThan(0.5).and(kind.lessThan(2.5)).or(kind.greaterThan(4.5).and(kind.lessThan(7.5))), () => {
       col.addAssign(u.uSunLight.mul(pow(max(dot(reflect(V.negate(), N), u.uSunDir), 0.0), 30.0)).mul(0.15).mul(sh))
     })
     col.assign(outdoorHaze(col, wp))
-    col.addAssign(emit.mul(uniforms.uLightGain).mul(exp(dist.negate().div(u.uHazeDist.mul(1.5)))))
+    col.addAssign(paintEmit(emit.mul(uniforms.uLightGain)).mul(exp(dist.negate().div(u.uHazeDist.mul(1.5)))))
     return col
   })()
   const depth = depthMaterial({ positionNode })

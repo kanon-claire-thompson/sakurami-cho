@@ -38,6 +38,8 @@ import { townLight } from '../town/facades'
 import { townLamps } from '../town/lamps'
 import { townShadow } from '../town/shadows'
 import { ObjectNodeMaterial, envRefl, facingNormal, localFrame, matAttr, metalFresnel, sunSpecular, vertexColorAttr, woodGrain } from './transitMaterial'
+import { markPaint, paintEmit, paintFlat } from '../paint'
+import { cabinLight, flatGlass } from '../paintParts'
 
 type Node<T = unknown> = THREE.Node<T>
 
@@ -190,9 +192,88 @@ function vehicleVaryings(builder: THREE.NodeBuilder) {
   return { vSunLocal, vCamLocal }
 }
 
+/**
+ * 外の塗り（paint.ts）の flat のときの不透明な面の色: むら・織りの目・滑り止めの粒・木目・つやの照り返し・映り込みを省き、材質の番号ごとの
+ * 平らな色を、外は面の光の式・中は中の光の式（窓から入る日なたと空の光・天井の灯り）で塗る。灯り・案内の表示は光る物の色の式（emit）に通す
+ */
+function flatDetailColor(builder: THREE.NodeBuilder, v: VehicleTsl) {
+  const u = outdoorUniforms
+  return Fn(() => {
+    const { vSunLocal } = vehicleVaryings(builder)
+    const wp = positionWorld.toVar()
+    const N = facingNormal().toVar()
+    const Nl = normalize(normalGeometry).mul(faceDirection).toVar()
+    const vLocal = positionGeometry.toVar()
+    const info = attribute<'vec4'>('iInfo', 'vec4').toVar()
+    const mat = matAttr().toVar()
+    const id = floor(mat.x.add(0.5)).toVar()
+    const aux = mat.y.toVar()
+    const dist = length(cameraPosition.sub(wp)).toVar()
+    const vColor = vertexColorAttr().toVar()
+    const albedo = vec3(vColor).toVar()
+    const metal = float(0.0).toVar()
+    const emit = vec3(0.0).toVar()
+    const inside = v.inside(vLocal).toVar()
+    const lampOn = info.x.toVar()
+    const an = abs(Nl).toVar()
+    If(id.greaterThan(2.5).and(id.lessThan(3.5)), () => {
+      metal.assign(1.0)
+    })
+      .ElseIf(id.greaterThan(3.5).and(id.lessThan(4.5)).and(aux.greaterThan(0.5)), () => {
+        // 木の甲板: 板の目地だけ（形）
+        const seam = smoothstep(0.0, 0.006, abs(fract(vLocal.x.div(0.09)).sub(0.5)).mul(0.09).sub(0.04).add(0.006))
+        albedo.mulAssign(seam.mul(0.3).add(0.7))
+      })
+      .ElseIf(id.greaterThan(5.5).and(id.lessThan(6.5)), () => {
+        albedo.assign(vColor.mul(0.5))
+        If(aux.lessThan(0.5), () => {
+          emit.assign(vColor.mul(lampOn.mul(3.0).add(0.15)))
+        })
+          .ElseIf(aux.lessThan(1.5), () => {
+            emit.assign(vColor.mul(lampOn.mul(2.6).add(0.2)))
+          })
+          .ElseIf(aux.lessThan(2.5), () => {
+            emit.assign(vColor.mul(lampOn.mul(6.0).add(0.4)))
+          })
+          .Else(() => {
+            emit.assign(vColor.mul(max(lampOn, u.uDaylight.oneMinus()).mul(3.5).add(0.3)))
+          })
+      })
+      .ElseIf(id.greaterThan(9.5).and(id.lessThan(10.5)), () => {
+        // 案内の表示（点の字の形はそのまま）
+        const q = vec2(select(an.x.greaterThan(an.z), vLocal.z, vLocal.x).mul(72.0), vLocal.y.mul(72.0)).toVar()
+        const cell = floor(q).toVar()
+        const cx = floor(cell.x.div(6.0)).toVar()
+        const dx = cell.x.sub(cx.mul(6.0)).toVar()
+        const row = floor(cell.y.div(9.0)).toVar()
+        const dy = cell.y.sub(row.mul(9.0)).toVar()
+        const page = floor(u.uTime.div(4.0).add(aux)).toVar()
+        const glyph = step(0.2, oHash(vec2(cx.add(page.mul(5.0)), row.add(aux.mul(3.0)))))
+        const on = select(dx.lessThan(5.0).and(dy.lessThan(7.0)), step(0.5, oHash(vec2(cx.mul(7.0).add(dx).add(page.mul(31.0)).add(aux.mul(17.0)), row.mul(11.0).add(dy)))).mul(glyph), 0.0)
+        const dot1 = smoothstep(0.4, 0.42, length(fract(q).sub(0.5))).oneMinus()
+        albedo.assign(vec3(0.02))
+        emit.assign(vec3(1.0, 0.45, 0.08).mul(on).mul(dot1).mul(2.2).mul(max(lampOn, 0.6).mul(0.65).add(0.35)))
+      })
+      .ElseIf(id.greaterThan(10.5).and(id.lessThan(11.5)), () => {
+        albedo.mulAssign(smoothstep(0.58, 0.62, oNoise(vLocal.xz.mul(4.0))).mul(0.3).add(0.75))
+      })
+    const sh = townShadow(wp, N).toVar()
+    // 中の照度: 窓を通る日なた・空の光・天井の灯り
+    const sun = v.sunThrough(vLocal, vSunLocal).mul(max(dot(Nl, vSunLocal), 0.0)).mul(sh)
+    const E = u.uSunLight.mul(sun).add(u.uSkyLight.mul(0.5)).add(v.lamp(vLocal, Nl).mul(lampOn))
+    const amb = u.uSkyLight.mul(0.45).add(vec3(1.0, 0.86, 0.66).mul(lampOn).mul(0.12))
+    const col = cabinLight(albedo.mul(metal.mul(-0.6).add(1.0)), N, float(1.0), sh, inside, E, amb).toVar()
+    col.addAssign(albedo.mul(townLamps(wp, N)).mul(select(inside, 0.25, 0.6)))
+    col.assign(outdoorHaze(col, wp))
+    col.addAssign(paintEmit(emit).mul(exp(dist.negate().div(u.uHazeDist.mul(1.5)))))
+    return col
+  })()
+}
+
 /** 不透明な面の色 */
 function detailColor(builder: THREE.NodeBuilder, v: VehicleTsl) {
   const u = outdoorUniforms
+  if (paintFlat()) return flatDetailColor(builder, v)
   return Fn(() => {
     const { vSunLocal } = vehicleVaryings(builder)
     const wp = positionWorld.toVar()
@@ -348,6 +429,22 @@ function detailColor(builder: THREE.NodeBuilder, v: VehicleTsl) {
 /** ガラスの色と透け（vec4） */
 export function detailGlassColor(builder: THREE.NodeBuilder, camInside: (c: Node<'vec3'>) => Node<'bool'>, room: THREE.Color) {
   const u = outdoorUniforms
+  if (paintFlat()) {
+    // 外の塗り（paint.ts）の flat: 透けるガラスの式（映り込み・太陽のきらめきは描かない）
+    return Fn(() => {
+      const { vCamLocal } = vehicleVaryings(builder)
+      const wp = positionWorld.toVar()
+      const info = attribute<'vec4'>('iInfo', 'vec4').toVar()
+      const N = normalize(normalWorldGeometry).toVar()
+      const V = normalize(cameraPosition.sub(wp)).toVar()
+      If(dot(N, V).lessThan(0.0), () => {
+        N.assign(N.negate())
+      })
+      const roomC = vec3(room.r, room.g, room.b).mul(info.x).mul(0.3)
+      const c = flatGlass(N, V, wp, roomC, camInside(vCamLocal)).toVar()
+      return vec4(outdoorHaze(c.rgb, wp), c.a)
+    })()
+  }
   return Fn(() => {
     const { vCamLocal } = vehicleVaryings(builder)
     const wp = positionWorld.toVar()
@@ -388,7 +485,7 @@ export function detailGlassColor(builder: THREE.NodeBuilder, camInside: (c: Node
 
 /** 細かい車両の不透明な面の材質（インスタンス） */
 export function createDetailMaterial(v: VehicleTsl) {
-  const m = new ObjectNodeMaterial({ fog: false, side: THREE.DoubleSide })
+  const m = markPaint(new ObjectNodeMaterial({ fog: false, side: THREE.DoubleSide }), 'light')
   m.name = `${v.name}Detail`
   m.buildNodes = (mat, builder) => {
     mat.colorNode = detailColor(builder, v)
@@ -398,7 +495,7 @@ export function createDetailMaterial(v: VehicleTsl) {
 
 /** 細かい車両のガラス（透ける。空を映し、夜は中の灯りの色） */
 export function createDetailGlassMaterial(v: VehicleTsl) {
-  const m = new ObjectNodeMaterial({ fog: false, side: THREE.DoubleSide, transparent: true, depthWrite: false })
+  const m = markPaint(new ObjectNodeMaterial({ fog: false, side: THREE.DoubleSide, transparent: true, depthWrite: false }), 'window')
   m.name = `${v.name}DetailGlass`
   m.buildNodes = (mat, builder) => {
     mat.colorNode = detailGlassColor(builder, (c) => v.camInside(c), new THREE.Color(0.95, 0.85, 0.7))

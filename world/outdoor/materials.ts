@@ -48,7 +48,7 @@ import { townLight } from './town/facades'
 import { townShadow } from './town/shadows'
 import { townTextureUniforms } from './town/townTextures'
 import { townLamps } from './town/lamps'
-import { outdoorPaint } from './paint'
+import { markPaint, outdoorPaint, paintEmit, paintFlat } from './paint'
 
 type Node<T = unknown> = THREE.Node<T>
 
@@ -245,7 +245,7 @@ export const fbm = Fn(([p0]: [Node<'vec2'>]) => {
 /** 空のドーム（大きな球の内側）。雲（ノイズ）と太陽の円盤も描く。深度は書かない。外の塗り（paint.ts）の skyDome を入れたら、雲と太陽はそちら */
 export function createSkyMaterial(clouds: boolean) {
   const u = outdoorUniforms
-  const m = unlit('outdoorSky', { side: THREE.BackSide, depthWrite: false })
+  const m = markPaint(unlit('outdoorSky', { side: THREE.BackSide, depthWrite: false }), 'sky')
   const paint = outdoorPaint()
   if (paint?.skyDome) {
     const dome = paint.skyDome
@@ -299,6 +299,7 @@ export function createStarsMaterial(a: StarAttributes) {
   const uStars = uniform(0)
   const m = new THREE.PointsNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: false, fog: false })
   m.name = 'outdoorStars'
+  markPaint(m, 'glow')
   const pos = instancedBufferAttribute(a.position, 'vec3' as const)
   const mag = instancedBufferAttribute(a.mag, 'float' as const)
   const seed = instancedBufferAttribute(a.seed, 'float' as const)
@@ -329,7 +330,7 @@ export function createStarsMaterial(a: StarAttributes) {
 export function createStructureMaterial() {
   const uniforms = { uClock: uniform(0), uWindows: uniform(0), uCable: uniform(0), uPath: uniform(0), uLightGain: uniform(1) }
   // 両面を描く（岸壁・線路・橋などの面の向きをそろえなくてよいように）。法線は見ている側へ向ける
-  const m = unlit('outdoorStructures', { side: THREE.DoubleSide })
+  const m = markPaint(unlit('outdoorStructures', { side: THREE.DoubleSide }), 'light')
   m.colorNode = Fn(() => {
     const wp = positionWorld.toVar()
     const N = normalize(normalWorld).toVar() // 両面: normalWorld は裏の面で反転済み（MeshBasicNodeMaterial の setupNormal）
@@ -356,7 +357,7 @@ export function createStructureMaterial() {
       0.0,
       select(emit.w.lessThan(1.5), uniforms.uClock, select(emit.w.lessThan(2.5), uniforms.uWindows, select(emit.w.lessThan(3.5), uniforms.uCable, uniforms.uPath))),
     )
-    col.addAssign(emit.xyz.mul(k).mul(uniforms.uLightGain))
+    col.addAssign(paintEmit(emit.xyz.mul(k).mul(uniforms.uLightGain)))
     return outdoorHaze(col, wp)
   })()
   return withUniforms(m, uniforms)
@@ -373,7 +374,12 @@ export function createStructureMaterial() {
 export function createDomeMaterial(ribs: number, rings: number) {
   const u = outdoorUniforms
   const uniforms = { uDome: uniform(0), uRibs: uniform(ribs), uRings: uniform(rings) }
-  const m = unlit('outdoorDome')
+  const m = markPaint(unlit('outdoorDome'), 'light')
+  const paint = outdoorPaint()
+  if (paint && paintFlat()) {
+    m.colorNode = flatDome(uniforms)
+    return withUniforms(m, uniforms)
+  }
   m.colorNode = Fn(() => {
     const wp = positionWorld.toVar()
     const unit = positionGeometry.toVar()
@@ -419,6 +425,58 @@ export function createDomeMaterial(ribs: number, rings: number) {
   return withUniforms(m, uniforms)
 }
 
+/**
+ * 外の塗りの flat のときのガーデンドーム: 骨は面の光の式（'dome'）、ガラスは外の塗りの透けるガラス（無ければ空の映り）を中の木々の
+ * 2 段の緑の上に、葉脈ライティングは形のはっきりした筋（2 段）を光る物の色の式（emit）に通す。ガラスの細かい葉のまだら・太陽の照り返しは描かない
+ */
+function flatDome(uniforms: { uDome: Node<'float'>; uRibs: Node<'float'>; uRings: Node<'float'> }) {
+  const u = outdoorUniforms
+  const paint = outdoorPaint()!
+  const shade = (a: Node<'vec3'>, N: Node<'vec3'>) => (paint.light ? paint.light(a, N, float(1.0), float(1.0), 'dome') : outdoorShade(a, N))
+  return Fn(() => {
+    const wp = positionWorld.toVar()
+    const unit = positionGeometry.toVar()
+    const N = normalize(normalWorld).toVar()
+    const V = normalize(cameraPosition.sub(wp)).toVar()
+    const az = atan(unit.z, unit.x).div(6.2831853).mul(uniforms.uRibs).toVar()
+    const el = asin(clamp(unit.y, 0.0, 1.0)).div(1.5707963).mul(uniforms.uRings.add(1.0)).toVar()
+    const fa = abs(fract(az).sub(0.5))
+    const fe = abs(fract(el).sub(0.5))
+    const wa = fwidth(az).mul(1.2).add(0.012)
+    const we = fwidth(el).mul(1.2).add(0.02)
+    const rib = max(smoothstep(float(0.5).sub(wa), 0.5, fa), smoothstep(float(0.5).sub(we), 0.5, fe).mul(step(0.5, el))).toVar()
+    const cosEl = sqrt(max(unit.y.mul(unit.y).oneMinus(), 0.04))
+    const g = el.mul(2.4).div(max(cosEl, 0.35))
+    const g1 = az.mul(2.0).add(g).toVar()
+    const g2 = az.mul(2.0).sub(g)
+    const wg = fwidth(g1).mul(0.8).add(0.006)
+    const lattice = max(smoothstep(float(0.5).sub(wg), 0.5, abs(fract(g1).sub(0.5))), smoothstep(float(0.5).sub(wg), 0.5, abs(fract(g2).sub(0.5))))
+    const latticeFade = smoothstep(0.08, 0.25, fwidth(g1)).oneMinus()
+    rib.assign(max(rib, lattice.mul(0.75).mul(latticeFade)))
+    // 中の木々: 大きな塊の 2 段の緑
+    const leaves = smoothstep(0.48, 0.52, oNoise(unit.xz.mul(5.0).add(unit.y.mul(2.0)))).toVar()
+    const inside = shade(mix(vec3(0.03, 0.07, 0.03), vec3(0.08, 0.14, 0.05), leaves), vec3(0.0, 1.0, 0.0)).mul(0.8).toVar()
+    const col = vec3(inside).toVar()
+    if (paint.glass) {
+      const gl = paint.glass(N, V, wp, vec3(0.0)).toVar()
+      col.assign(mix(inside, gl.rgb, gl.a))
+    } else {
+      const R = reflect(V.negate(), N)
+      const fres = smoothstep(0.55, 0.6, dot(N, V).oneMinus()).mul(0.5).add(0.15)
+      col.assign(mix(inside, skyColor(R).mul(vec3(0.92, 0.97, 1.0)), fres))
+    }
+    col.assign(mix(col, shade(vec3(0.8, 0.8, 0.78), N), rib.mul(0.9)))
+    // 葉脈ライティング（金緑色。ゆっくり呼吸するように明滅。筋は形のはっきりした 2 段）
+    const breath = sin(u.uTime.mul(0.55)).mul(0.38).add(0.62).toVar()
+    const vn = oNoise(unit.xz.mul(16.0).add(vec2(u.uTime.mul(0.05), 0.0))).toVar()
+    const veins = smoothstep(0.7, 0.72, vn).mul(0.6).add(smoothstep(0.82, 0.84, vn).mul(0.4))
+    const glow = vec3(0.55, 1.0, 0.32).mul(leaves.mul(0.3).add(0.45)).mul(breath).add(vec3(0.9, 1.0, 0.45).mul(veins).mul(breath).mul(1.2))
+    col.addAssign(paintEmit(glow.mul(uniforms.uDome).mul(rib.mul(-0.7).add(1.0)).mul(1.6)))
+    col.addAssign(paintEmit(vec3(0.7, 0.9, 0.5).mul(rib).mul(uniforms.uDome).mul(0.25).mul(breath)))
+    return outdoorHaze(col, wp)
+  })()
+}
+
 /* -------------------------------------------------------------------------- */
 /* 夜の灯り・灯台の光                                                             */
 /* -------------------------------------------------------------------------- */
@@ -451,6 +509,7 @@ export function createLightsMaterial(a: LightAttributes) {
   const u = uniforms
   const m = new THREE.PointsNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: false, fog: false })
   m.name = 'outdoorLights'
+  markPaint(m, 'glow')
   const pos = instancedBufferAttribute(a.position, 'vec3' as const)
   const aColor = instancedBufferAttribute(a.aColor, 'vec3' as const)
   const aSize = instancedBufferAttribute(a.aSize, 'float' as const)
@@ -520,7 +579,8 @@ export function createLightsSprite(g: THREE.BufferGeometry) {
 /** 灯台の光の帯（灯台から水平に伸びる細い円錐。加算合成で、灯台に近いほど・光の芯ほど明るい） */
 export function createBeamMaterial() {
   const uniforms = { uBeam: uniform(0) }
-  const m = unlit('outdoorBeam', { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide })
+  const m = markPaint(unlit('outdoorBeam', { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }), 'glow')
+  const flat = paintFlat()
   // 法線は頂点で世界の向きにして、正規化しないまま補間する（細い帯の縁の画素では補間した法線が 0 の長さになることがあり、正規化すると NaN）
   const vNormal = varying(modelWorldMatrix.mul(vec4(normalLocal, 0.0)).xyz)
   m.colorNode = Fn(() => {
@@ -536,6 +596,12 @@ export function createBeamMaterial() {
     // カメラの近く（ラボのまわり）を通る帯の殻は描かない。帯がラボの方へ回ってくるとき、近くの殻が町の上に大きな灰色の膜になって
     // 見えるため（ラボの方を向く前後は帯ごと消す。landscape.ts）
     const nearFade = smoothstep(400.0, 2500.0, d)
+    if (flat) {
+      // 外の塗りの flat: 帯の明るさを 2 段の平らな光に（芯と外側。縁はくっきり）
+      const q = thick.mul(fall).toVar()
+      const level = smoothstep(0.12, 0.14, q).mul(0.45).add(smoothstep(0.42, 0.45, q).mul(0.55))
+      return paintEmit(vec3(0.85, 0.9, 1.0).mul(level).mul(haze).mul(nearFade).mul(uniforms.uBeam).mul(0.3))
+    }
     return vec3(0.85, 0.9, 1.0).mul(thick).mul(fall).mul(haze).mul(nearFade).mul(uniforms.uBeam).mul(0.22)
   })()
   return withUniforms(m, uniforms)

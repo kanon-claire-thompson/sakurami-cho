@@ -36,6 +36,7 @@ import { GeoBuilder } from '../site/builder'
 import { townLight } from '../town/facades'
 import { townLamps } from '../town/lamps'
 import { townShadow } from '../town/shadows'
+import { markPaint, outdoorPaint, paintEmit, paintFlat } from '../paint'
 import { boatNet } from './boats'
 import { cableTrack } from './cable'
 import { CABLE_RUN, CABLE_TRIPS, cableTrip, tripStart } from '../../../core/transit/cableRun'
@@ -279,7 +280,9 @@ function createRobotMaterial(plate: THREE.Texture | null, rows: number) {
     uPlateRows: uniform(rows),
     uBands: uniformArray([new THREE.Color('#a82b23'), new THREE.Color('#d9a21b'), new THREE.Color('#2c3f66')], 'color'),
   }
-  const m = unlit('stationRobot')
+  const m = markPaint(unlit('stationRobot'), 'light')
+  const paint = outdoorPaint()
+  const flat = paintFlat()
   const vColor = attribute<'vec3'>('color', 'vec3')
   const vMat = attribute<'vec2'>('aMat', 'vec2')
   const vInfo = attribute<'vec4'>('iInfo', 'vec4')
@@ -298,7 +301,7 @@ function createRobotMaterial(plate: THREE.Texture | null, rows: number) {
     const metal = float(0.0).toVar()
     const emit = vec3(0.0).toVar()
     If(id.lessThan(0.5), () => {
-      albedo.mulAssign(oNoise(vLocal.xy.mul(30.0)).mul(0.05).add(0.96))
+      if (!flat) albedo.mulAssign(oNoise(vLocal.xy.mul(30.0)).mul(0.05).add(0.96))
     })
       .ElseIf(id.lessThan(1.5), () => {
         gloss.assign(aux.mul(0.4).add(0.08))
@@ -330,6 +333,17 @@ function createRobotMaterial(plate: THREE.Texture | null, rows: number) {
         gloss.assign(0.5)
       })
     const room = vInfo.z.toVar()
+    if (flat) {
+      // 外の塗り（paint.ts）の flat: 外は面の光の式、建物の中は中の光の式（灯りの色と上からの向き）。照り返し・映り込みは省く
+      const sh0 = townShadow(wp, N)
+      const a = albedo.mul(metal.mul(-0.6).add(1.0))
+      const outC = townLight(a, N, float(1.0), sh0, 'vehicle')
+      const inC = paint?.interior ? paint.interior(a, vRoom.mul(max(N.y, 0.0).mul(0.9).add(1.1)), vRoom, N, float(1.0)) : a.mul(vRoom)
+      const c = mix(outC, inC, room).add(albedo.mul(townLamps(wp, N)).mul(0.7)).toVar()
+      c.assign(outdoorHaze(c, wp))
+      c.addAssign(paintEmit(emit).mul(exp(dist.negate().div(u.uHazeDist.mul(1.5)))))
+      return c
+    }
     const sh = townShadow(wp, N).toVar()
     const col = townLight(albedo.mul(metal.mul(-0.6).add(1.0)), N, float(1.0), mix(sh, 1.0, room.mul(0.5))).mul(room.mul(-0.75).add(1.0)).toVar()
     // 建物の中の光（まわりの明るさと灯りの色。上からの向き）

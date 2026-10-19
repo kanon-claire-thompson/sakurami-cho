@@ -338,6 +338,8 @@ export function createTreeMaterials() {
   const domeGlow = (albedo: V3, ao: F, wp: V3, seed: F, leaf: F) => {
     // 外の塗り（paint.ts）の flat は、まわりの明るさを強めに足す（質感・透ける光の分が無いので、夕方のドームの中の木がほぼ黒い塊だった）
     const c = albedo.mul(uniforms.uExtraAmb).mul(ao.mul(0.4).add(0.6)).mul(paintFlat() ? 4.5 : 1.6).toVar()
+    // 平らな塗りは、温室の中の木（まわりの明るさが入っている物だけ）に空の光も平らに足す（夕方は中の灯りが弱く、まわりの明るさだけでは足りなかった）
+    if (paintFlat()) c.addAssign(albedo.mul(u.uSkyLight).mul(0.9).mul(ao).mul(step(1e-6, dot(uniforms.uExtraAmb, vec3(1.0)))))
     If(uniforms.uVein.greaterThan(0.0).and(leaf.greaterThan(0.5)), () => {
       const breath = sin(t.mul(0.55)).mul(0.38).add(0.62)
       // 光の点: 3 次元の升（0.45m）ごとに 1 つ、升の中の決まった所に小さな丸い光（前は升の面がそのまま光って、明るい四角の板に見えた）

@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { disposeGeometries } from '../../dispose'
 import { townOptions, type TownDoorOpener, type TownFocus } from '../../townHost'
 import { INTERIOR_ZONES, INTERIOR_ZONE_IDS, zoneAt, type InteriorZoneId } from '../../../core/interiors'
 import { townPlaces } from '../../../core/places'
@@ -341,7 +342,8 @@ class Interiors {
     if (!lo) return
     localShadowCasters.delete(lo.group)
     this.group.remove(lo.group)
-    lo.group.traverse((o) => (o as THREE.Mesh).geometry?.dispose())
+    // Sprite の形（three の全部の Sprite が共有する）は捨てない（disposeGeometries）
+    disposeGeometries(lo.group)
     for (const m of lo.materials) m.dispose()
     lo.atlas.dispose()
     namedInteriorParts.setActive(lo.model.zone.buildingId, false)

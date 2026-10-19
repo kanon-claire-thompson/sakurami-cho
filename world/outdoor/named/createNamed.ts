@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { disposeGeometries } from '../../dispose'
 import { townOptions } from '../../townHost'
 import { OUTDOOR_LAYER } from '../layers'
 import { createSiteGlassMaterial } from '../site/siteMaterial'
@@ -97,7 +98,7 @@ export function createNamedTown(named: NamedFile, infra: TownInfra, heightAt: (x
   function rebuild(center: [number, number]) {
     for (const m of meshes) {
       group.remove(m)
-      m.traverse((c) => (c as THREE.Mesh).geometry?.dispose())
+      disposeGeometries(m)
     }
     meshes = []
     namedDoors.clear()

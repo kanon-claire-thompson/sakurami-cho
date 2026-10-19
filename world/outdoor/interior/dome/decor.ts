@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { disposeGeometries } from '../../../dispose'
 import { sceneOf } from '../../../../core/interiors'
 import { outdoor } from '../../../environment/daylight'
 import { createTreeMaterials, TREE, treeMeshesFromList, type TreeItem as TownTree } from '../../town/trees'
@@ -233,8 +234,8 @@ export function domeDecor(ctx: DecorContext): InteriorDecor {
     objects,
     update,
     dispose: () => {
-      // Sprite の形（板 1 枚）は three の全部の Sprite が共有するので片付けない（霧の粒）
-      for (const o of objects) o.traverse((c) => !(c as THREE.Sprite).isSprite && (c as THREE.Mesh).geometry?.dispose())
+      // Sprite の形（板 1 枚）は three の全部の Sprite が共有するので片付けない（霧の粒。disposeGeometries）
+      for (const o of objects) disposeGeometries(o)
       for (const d of disposables) d.dispose()
     },
   }

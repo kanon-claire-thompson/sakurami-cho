@@ -274,6 +274,11 @@ export class KitBuilder {
   }
 
   build() {
+    if (this.thin.length !== this.vertexCount * 4) {
+      // 頂点を vertex() を通さずに足した所が aThin を書き忘れている（ほかの値と頂点がずれて、近くの形がゆがむ）。気づけるように知らせ、0 で埋めて揃える
+      console.error(`[sakurami-cho] KitBuilder: aThin の数（${this.thin.length / 4}）が頂点の数（${this.vertexCount}）と違います（細い棒を太らせません）`)
+      this.thin = new Array(this.vertexCount * 4).fill(0)
+    }
     const g = new THREE.BufferGeometry()
     g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3))
     g.setAttribute('normal', new THREE.Float32BufferAttribute(this.nrm, 3))

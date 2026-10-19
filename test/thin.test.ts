@@ -4,6 +4,7 @@
  */
 import { describe, expect, test } from 'bun:test'
 import { KitBuilder } from '../world/outdoor/named/kitBuilder'
+import { placeLocal } from '../world/outdoor/named/kit'
 
 describe('KitBuilder の aThin', () => {
   test('細い角柱（格子の桟）は、細い 2 つの向きの差と断面の半分の幅', () => {
@@ -37,5 +38,21 @@ describe('KitBuilder の aThin', () => {
     b.quad([0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], '#ffffff', 0)
     b.merge(a)
     expect(b.thin.length).toBe(b.vertexCount * 4)
+  })
+  test('局所の形を置く（placeLocal。扉・窓の飾り）と、aThin も頂点と同じ数だけ、向きを回して足す', () => {
+    const src = new KitBuilder()
+    src.box([0, 0, 0], [0.03, 2, 0.03], '#ffffff', 0)
+    const dst = new KitBuilder()
+    dst.quad([0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], '#ffffff', 0)
+    // across = -z・out = +x（局所の x → シーンの -z）
+    placeLocal(dst, src, [5, 0, 5], [0, 0, -1], [1, 0, 0])
+    expect(dst.thin.length).toBe(dst.vertexCount * 4)
+    const g = dst.build()
+    const a = g.getAttribute('aThin')
+    const p = g.getAttribute('position')
+    for (let i = 4; i < a.count; i++) {
+      expect(a.getX(i)).toBeCloseTo(p.getX(i) - 5, 3)
+      expect(a.getZ(i)).toBeCloseTo(p.getZ(i) - 5, 3)
+    }
   })
 })

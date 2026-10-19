@@ -581,6 +581,8 @@ function mirrorZ(b: KitBuilder) {
     b.pos[i] = -b.pos[i]
     b.nrm[i] = -b.nrm[i]
   }
+  // 細い棒の差（aThin）の z も
+  for (let i = 2; i < b.thin.length; i += 4) b.thin[i] = -b.thin[i]
   for (let i = 0; i < b.idx.length; i += 3) [b.idx[i + 1], b.idx[i + 2]] = [b.idx[i + 2], b.idx[i + 1]]
 }
 
@@ -609,6 +611,12 @@ export function placeLocal(dst: KitBuilder, src: KitBuilder, hinge: V3, across: 
   dst.col.push(...src.col)
   dst.mat.push(...src.mat)
   for (let i = 0; i < src.ext.length; i += 4) dst.ext.push(src.ext[i], dst.groundY, dst.seed, dst.dirt)
+  // 細い棒の差（aThin。向きだけ回す。頂点と同じ数だけ足さないと、ほかの値と頂点がずれる）
+  const rot = new THREE.Matrix3().setFromMatrix4(m)
+  for (let i = 0; i < src.thin.length; i += 4) {
+    v.set(src.thin[i], src.thin[i + 1], src.thin[i + 2]).applyMatrix3(rot)
+    dst.thin.push(v.x, v.y, v.z, src.thin[i + 3])
+  }
   for (const i of src.idx) dst.idx.push(i + base)
 }
 

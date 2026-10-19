@@ -1,9 +1,11 @@
 import * as THREE from 'three'
+import { THIN_MAX, THIN_RATIO } from '../thin'
 
 /**
  * 名前のある建物の細かい形を、頂点の配列へ直接書いて作る道具（site/builder.ts の GeoBuilder と同じ考えに、環境光の遮りと地面の高さを足したもの）。
  * 頂点: 位置（シーンの座標）・法線・色（リニア）・aMat（x = 質感の種類 NM、y = 種類ごとの値）・aExt（x = 環境光の遮り、y = 地面の高さ（シーンの y）、
- * z = 建物の種、w = 汚れやすさ）。面の表は外向き。シェーダー（namedMaterial.ts）は片面で描く
+ * z = 建物の種、w = 汚れやすさ）・aThin（細い角柱の頂点の、細い向きの中心の線からの差 xyz と断面の半分の幅 w。ほかは 0。outdoor/thin.ts）。
+ * 面の表は外向き。シェーダー（namedMaterial.ts）は片面で描く
  */
 
 type V3 = readonly [number, number, number]
@@ -15,6 +17,8 @@ const _m = new THREE.Matrix4()
 const _v = new THREE.Vector3()
 const _n = new THREE.Vector3()
 const _nm = new THREE.Matrix3()
+const _t = new THREE.Vector3()
+const NO_THIN: [number, number, number, number] = [0, 0, 0, 0]
 
 /** 単位の箱の 6 面（+x, -x, +y, -y, +z, -z。各面 4 点を表から見て反時計回り） */
 const BOX_FACES: { n: V3; v: V3[] }[] = [
@@ -39,6 +43,10 @@ export class KitBuilder {
   mat: number[] = []
   ext: number[] = []
   idx: number[] = []
+  /** 細い角柱の頂点の値（aThin。4 つずつ） */
+  thin: number[] = []
+  /** これから足す頂点の aThin（box が細い角柱の頂点ごとに書く） */
+  private thinV: [number, number, number, number] = NO_THIN
   /** これから足す頂点の環境光の遮り（1 = 遮りなし）・地面の高さ（シーンの y）・種・汚れやすさ */
   ao = 1
   groundY = -1000
@@ -63,6 +71,7 @@ export class KitBuilder {
     this.col.push(color.r, color.g, color.b)
     this.mat.push(m, aux)
     this.ext.push(this.ao, this.groundY, this.seed, this.dirt)
+    this.thin.push(this.thinV[0], this.thinV[1], this.thinV[2], this.thinV[3])
     return this.vertexCount - 1
   }
 
@@ -127,11 +136,23 @@ export class KitBuilder {
     _q.setFromEuler(_e)
     _m.compose(_v.set(center[0], center[1], center[2]), _q, new THREE.Vector3(size[0], size[1], size[2]))
     _nm.getNormalMatrix(_m)
+    // 細い角柱（断面の 2 つの向きが THIN_MAX 以下で、いちばん長い向きがその THIN_RATIO 倍以上）: 細い向きの差を aThin に（遠くで画素の幅まで太らせる）
+    const long = Math.max(size[0], size[1], size[2])
+    // 棒（細い向きが 2 つ）だけ。板（細い向きが 1 つ。壁に沿った看板・額縁など）を太らせると、裏の壁へ食い込んだり手前へ浮いたりする
+    const thinAxis = size.map((d) => d <= THIN_MAX && long >= d * THIN_RATIO)
+    const half = thinAxis.filter(Boolean).length === 2 ? Math.min(...size.filter((_, i) => thinAxis[i])) / 2 : Infinity
     BOX_FACES.forEach((f, fi) => {
       if (!faces[fi]) return
       _n.set(f.n[0], f.n[1], f.n[2]).applyMatrix3(_nm).normalize()
       const i0 = this.vertexCount
-      for (const v of f.v) this.vertex(_v.set(v[0], v[1], v[2]).applyMatrix4(_m), _n, _c, m, aux)
+      for (const v of f.v) {
+        if (Number.isFinite(half)) {
+          _t.set(thinAxis[0] ? v[0] * size[0] : 0, thinAxis[1] ? v[1] * size[1] : 0, thinAxis[2] ? v[2] * size[2] : 0).applyQuaternion(_q)
+          this.thinV = [_t.x, _t.y, _t.z, half]
+        }
+        this.vertex(_v.set(v[0], v[1], v[2]).applyMatrix4(_m), _n, _c, m, aux)
+      }
+      this.thinV = NO_THIN
       this.idx.push(i0, i0 + 1, i0 + 2, i0, i0 + 2, i0 + 3)
     })
   }
@@ -248,6 +269,7 @@ export class KitBuilder {
     for (let i = 0; i < o.col.length; i++) this.col.push(o.col[i])
     for (let i = 0; i < o.mat.length; i++) this.mat.push(o.mat[i])
     for (let i = 0; i < o.ext.length; i++) this.ext.push(o.ext[i])
+    for (let i = 0; i < o.thin.length; i++) this.thin.push(o.thin[i])
     for (let i = 0; i < o.idx.length; i++) this.idx.push(o.idx[i] + base)
   }
 
@@ -258,6 +280,8 @@ export class KitBuilder {
     g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3))
     g.setAttribute('aMat', new THREE.Float32BufferAttribute(this.mat, 2))
     g.setAttribute('aExt', new THREE.Float32BufferAttribute(this.ext, 4))
+    // 半精度（頂点 1 つ 8 バイト）。Float16BufferAttribute は半精度に直した値を受け取る
+    g.setAttribute('aThin', new THREE.Float16BufferAttribute(Uint16Array.from(this.thin, (v) => THREE.DataUtils.toHalfFloat(v)), 4))
     g.setIndex(this.vertexCount > 65535 ? new THREE.Uint32BufferAttribute(this.idx, 1) : new THREE.Uint16BufferAttribute(this.idx, 1))
     g.computeBoundingSphere()
     return g

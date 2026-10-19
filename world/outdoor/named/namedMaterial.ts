@@ -1,4 +1,5 @@
 import * as THREE from 'three/webgpu'
+import { thinWidened } from '../thin'
 import {
   Break,
   Continue,
@@ -607,6 +608,8 @@ export function namedSurface(v: SurfaceInputs, interior?: (s: SurfaceState) => v
 export function createNamedMaterial() {
   const u = outdoorUniforms
   const m = markPaint(unlit('namedSurfaces', { side: THREE.DoubleSide }), 'light')
+  // 外の塗りの flat: 格子の桟・手すりなどの細い形を、画素より細くなる遠くで画素の幅まで太らせる（outdoor/thin.ts。塗りを入れなければ前と同じ）
+  if (paintFlat()) m.positionNode = thinWidened()
   const v = surfaceVaryings()
   m.colorNode = Fn(() => {
     const wp = v.world

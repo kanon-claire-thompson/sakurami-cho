@@ -44,6 +44,7 @@ import { townLamps, LAMP, type Lamp } from './lamps'
 import type { TownTile } from './townData'
 import { markPaint, paintEmit, paintFlat, paintLampLight } from '../paint'
 import { glyph } from '../glyph'
+import { barHalfWidth, thinSize } from '../thin'
 
 /**
  * 建物の小物（形で描く）。外壁のシェーダーの模様だけでは平らに見える所に、厚みのある物を足す。
@@ -460,7 +461,8 @@ export function createPropMaterials() {
   const pA = attribute<'vec4'>('pA', 'vec4')
   const pB = attribute<'vec4'>('pB', 'vec4')
   const pC = attribute<'vec4'>('pC', 'vec4')
-  const p0 = positionGeometry.mul(pB.xyz)
+  // 外の塗りの flat: 手すりの子柱・アンテナの細い棒は、画素より細くなる遠くで画素の幅まで太らせる（outdoor/thin.ts。塗りを入れなければ前と同じ）
+  const p0 = positionGeometry.mul(paintFlat() ? thinSize(pB.xyz, pA.xyz) : pB.xyz)
   const n0 = normalGeometry
   // 傾き（局所の x の軸まわり）と向き（縦の軸まわり。建物の局所 x = 平面の (cos, sin)、シーンでは (cos, 0, -sin)）
   const ct = cos(pB.w)
@@ -508,7 +510,10 @@ export function createPropMaterials() {
       .ElseIf(kind.lessThan(1.5), () => {
         // 金属の手すり（縦の格子。近くは格子の間を抜く）
         const along = select(abs(vLN.x).greaterThan(0.5), m.z, m.x)
-        const bar = smoothstep(0.32, 0.45, abs(tslFract(along.div(0.11)).sub(0.5)))
+        // 外の塗りの flat: 桟が画素より細くなる遠くでは、桟を画素の幅まで太らせる（抜く・抜かないが画素ごとに入れ替わらないように。outdoor/thin.ts）
+        const bar = flat
+          ? step(float(0.5).sub(barHalfWidth(0.115, select(abs(vLN.x).greaterThan(0.5), fwm.z, fwm.x), 0.11)), abs(tslFract(along.div(0.11)).sub(0.5)))
+          : smoothstep(0.32, 0.45, abs(tslFract(along.div(0.11)).sub(0.5)))
         const top = step(vSize.y.sub(0.06), m.y).add(step(m.y, 0.05))
         If(fine.greaterThan(0.5).and(bar.lessThan(0.5)).and(top.lessThan(0.5)).and(abs(vLN.y).lessThan(0.5)), () => {
           Discard()

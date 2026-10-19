@@ -383,8 +383,15 @@ function transitColor(builder: THREE.NodeBuilder) {
         const uu = abs(along.sub(aux)).toVar()
         const q = vec2(along, vLocal.y).mul(28.0).toVar()
         const cellId = floor(q).toVar()
-        const dotm = smoothstep(0.25, 0.42, length(fract(q).sub(0.5))).oneMinus()
-        const ch = step(0.4, oHash(floor(cellId.div(vec2(5.0, 7.0))).add(info.z.mul(3.1)))).mul(step(0.3, oHash(cellId.add(info.z))))
+        // 点（3.6cm ごと）と文字の升（点 5 × 7）は、画素より細かくなる遠くで平均の明るさへ移す（前は 20m ほど先から点が画素の間に落ちたり乗ったりして、
+        // 走る電車の行き先がチカチカした）。fq = 1 画素あたりの点の数
+        const fq = max(fwidth(q.x), fwidth(q.y)).toVar()
+        const dotm = mix(smoothstep(0.25, 0.42, length(fract(q).sub(0.5))).oneMinus(), 0.35, smoothstep(0.35, 0.7, fq))
+        const ch = mix(
+          step(0.4, oHash(floor(cellId.div(vec2(5.0, 7.0))).add(info.z.mul(3.1)))).mul(step(0.3, oHash(cellId.add(info.z)))),
+          0.42,
+          smoothstep(0.15, 0.3, fq),
+        )
         albedo.assign(vec3(0.01))
         emit.assign(vec3(1.0, 0.55, 0.12).mul(dotm).mul(ch).mul(1.4).mul(step(0.26, uu)))
         emit.addAssign(lc.mul(1.3).mul(step(0.22, uu).oneMinus()).mul(step(0.03, uu)))

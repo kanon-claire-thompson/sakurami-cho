@@ -911,7 +911,7 @@ function wallSurface(s: Surf, V: V3, dist: F, part: F, ctx: BuildingCtx) {
       // 文字の画は升の 1 割強の太さなので、消し始めを細かい模様（fine）より遠くに
       const letters = smoothstep(0.03, 0.07, px)
         .oneMinus()
-        .mul(glyph(fract(cx), lev.sub(0.84).div(0.09), oHash(vec2(ci, seed.mul(5.0).add(bi)))))
+        .mul(glyph(fract(cx), lev.sub(0.84).div(0.09), oHash(vec2(ci, seed.mul(5.0).add(bi))), max(fwM.x.div(ch.mul(0.95)), fwy.div(0.09))))
         .mul(band(lev, 0.84, 0.93, fwy))
         .mul(band(fract(cu), 0.16, 0.84, fwM.x.div(bayW)))
         .mul(word)

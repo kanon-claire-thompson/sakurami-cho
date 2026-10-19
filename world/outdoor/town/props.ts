@@ -12,6 +12,7 @@ import {
   float,
   floor,
   fract as tslFract,
+  fwidth,
   int,
   length,
   max,
@@ -492,6 +493,8 @@ export function createPropMaterials() {
     const emit = vec3(0.0).toVar()
     const dist = length(cameraPosition.sub(wp)).toVar()
     const fine = smoothstep(30.0, 120.0, dist).oneMinus().toVar()
+    // 1 画素あたりの局所の座標の変わり（看板の文字の縁をなめらかにする。微分は分岐の外で取る）
+    const fwm = fwidth(m).toVar()
     If(kind.lessThan(0.5).or(kind.greaterThan(9.5)), () => {
       // コンクリートの床の板・仕切り: コンクリートの質感
       if (!flat) {
@@ -533,7 +536,7 @@ export function createPropMaterials() {
           const cw = max(vSize.z.sub(0.24), 0.1).toVar()
           const ry = m.y.sub(0.16).div(cw.mul(1.08)).toVar()
           const q = vec2(m.z.sub(0.12).div(cw), tslFract(ry))
-          const letters = glyph(q.x, q.y, tslFract(sin(floor(ry).mul(12.9).add(vColor.r.mul(37.0)).add(vColor.b.mul(11.0))).mul(43758.5)))
+          const letters = glyph(q.x, q.y, tslFract(sin(floor(ry).mul(12.9).add(vColor.r.mul(37.0)).add(vColor.b.mul(11.0))).mul(43758.5)), max(fwm.z, fwm.y.div(1.08)).div(cw))
             .mul(step(0.12, m.z))
             .mul(step(m.z, vSize.z.sub(0.12)))
             .mul(step(0.16, m.y))

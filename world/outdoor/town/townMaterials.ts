@@ -398,6 +398,14 @@ const windowLights = { uWindows: uniform(0), uOffice: uniform(0), uShop: uniform
 
 const srgbToLinear = (c: V3) => pow(max(c, 0.0), vec3(2.2))
 
+/**
+ * 面の中で変わらない値（建物ごとの用途・印・種・町並みの型、面の向きの番号）は、補間しない varying（flat。三角形の最初の頂点の値）で渡す。
+ * 補間すると、同じ値の頂点の間でも画素ごとに浮動小数の誤差（1e-7 ほど）が乗り、それを種にした窓の乱数（windowHash）が少しずつずれて、
+ * 点いているかの境（step(wh, occ)）に近い窓だけ、点いた窓と消えた窓が画素ごとに混ざる砂嵐になった（灯町の提灯小路の店先・港の煉瓦の建物の窓。
+ * アニメ塗りでも前の見た目でも出た）。値はそのまま（見た目の色・形は変わらない）
+ */
+const flatVarying = <T extends THREE.Node>(node: T) => varying(node).setInterpolation('flat') as unknown as T
+
 /** 0〜255 の値の属性（buildingKit.ts の instancedBuildingMesh が浮動小数で交互に並べた iWall・iRoof・iMeta）を vec4 で読む */
 const byteAttr = (name: string) => attribute<'vec4'>(name, 'vec4')
 
@@ -463,6 +471,7 @@ function buildingVertex(instanced: boolean) {
     const roofKind = iRoof.w
     const sideX = side.lessThan(1.5)
     const vFac = varying(vec4(select(sideX, l.x, l.y), h, select(sideX, w, d), side))
+    const vSide = flatVarying(side)
     const eaveEff = select(roofKind.lessThan(0.5), max(eave.sub(0.9), 2.2), eave)
     const floors = max(iExt.y, 1.0)
     const vB = varying(vec4(eaveEff, floors, select(abs(side.sub(iExt.z)).lessThan(0.5), 1.0, 0.0), aK.z))
@@ -471,7 +480,7 @@ function buildingVertex(instanced: boolean) {
     const vRoofC = varying(vec4(srgbToLinear(iRoof.rgb.div(255.0)), roofKind))
     const seed = iMeta.z.add(iMeta.w.mul(256.0)).div(65536.0)
     const meta = vec4(iMeta.x, iMeta.y, seed, iExt.w)
-    const vMeta = varying(meta)
+    const vMeta = flatVarying(meta)
     // 壁に沿った位置（vFac.x）の増える向き（シーンの座標）
     const tl = select(sideX, vec2(1.0, 0.0), vec2(0.0, 1.0))
     const vTan = varying(vec3(c.mul(tl.x).sub(s.mul(tl.y)), 0.0, s.mul(tl.x).add(c.mul(tl.y)).negate()))
@@ -479,7 +488,7 @@ function buildingVertex(instanced: boolean) {
     const vH = varying(vec4(eave, ridge, h, select(distance(iPos.xy, propsCenter.xy).lessThan(propsCenter.z), 1.0, 0.0)))
     const type = facadeType(wallC.w, meta.x, meta.y, floors, meta.w, seed)
     const vKind = varying(vec4(type, wallLayer(wallC.w, type, seed), dirtOf(meta.w, seed), fract(seed.mul(53.3))))
-    return { position, vFac, vB, vWallC, vRoofC, vMeta, vKind, vH, vTan, vAxis }
+    return { position, vFac, vSide, vB, vWallC, vRoofC, vMeta, vKind, vH, vTan, vAxis }
   }
   const aFac = attribute<'vec4'>('aFac', 'vec4')
   const aB = attribute<'vec4'>('aB', 'vec4')
@@ -494,10 +503,11 @@ function buildingVertex(instanced: boolean) {
   return {
     position: null,
     vFac: varying(aFac),
+    vSide: flatVarying(aFac.w),
     vB: varying(aB),
     vWallC: varying(wallC),
     vRoofC: varying(vec4(srgbToLinear(aRoof.rgb.div(255.0)), aRoof.a)),
-    vMeta: varying(aMeta),
+    vMeta: flatVarying(aMeta),
     vKind: varying(vec4(type, wallLayer(wallC.w, type, seed), dirtOf(aMeta.w, seed), fract(seed.mul(53.3)))),
     vH: varying(vec4(aB.x, aB.x, aFac.y, 0.0)),
     vTan: varying(vec3(aTan.x, 0.0, aTan.y.negate())),
@@ -740,7 +750,7 @@ function wallSurface(s: Surf, V: V3, dist: F, part: F, ctx: BuildingCtx) {
     })
   })
 
-  const wh = windowHash(bi, fi, vFac.w, seed).toVar()
+  const wh = windowHash(bi, fi, ctx.v.vSide, seed).toVar()
   const occ = occupancy(use, flags, fi, front, type, wl.uWindows, wl.uOffice, wl.uShop).toVar()
   const tiny = smoothstep(0.05, 0.16, px).toVar()
   const lit = mix(step(wh, occ), occ, tiny).toVar()

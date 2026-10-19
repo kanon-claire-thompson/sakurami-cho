@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu'
-import { float, mix, select, vec3, vec4 } from 'three/tsl'
+import { float, min, mix, select, vec3, vec4 } from 'three/tsl'
 import { outdoorUniforms, skyColor } from './materials'
 import { townLight } from './town/facades'
 import { outdoorPaint } from './paint'
@@ -31,6 +31,7 @@ export function cabinLight(albedo: V3, N: V3, ao: F, sh: F, inside: Node<'bool'>
 export function flatGlass(N: V3, V: V3, wp: V3, room: V3, camIn?: Node<'bool'>): Node<'vec4'> {
   const p = outdoorPaint()
   const g = p?.glass ? p.glass(N, V, wp, room).toVar() : vec4(skyColor(vec3(0.0, 0.3, 1.0)).mul(0.6).add(room), float(0.35)).toVar()
-  if (camIn) g.assign(select(camIn, vec4(mix(g.rgb, room.add(outdoorUniforms.uSkyLight.mul(0.05)), 0.5), g.a.mul(0.45)), g))
+  // 中から見るガラスは、帯の濃さ（透けの差）も消して一様にうすく（ゴンドラの中から見ると、すぐ前のガラスの斜めの帯が窓いっぱいの太い帯に見えた）
+  if (camIn) g.assign(select(camIn, vec4(mix(g.rgb, room.add(outdoorUniforms.uSkyLight.mul(0.05)), 0.6), min(g.a, 0.2).mul(0.45)), g))
   return g
 }

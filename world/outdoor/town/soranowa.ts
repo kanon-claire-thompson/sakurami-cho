@@ -131,11 +131,14 @@ function createWheelLineMaterial() {
   const d = max(cameraViewMatrix.mul(vec4(wp, 1.0)).z.negate(), 0.1).toVar()
   const px = aWidth.mul(uniforms.uPx).div(d).toVar()
   const w = max(px, 1.2).div(uniforms.uPx).mul(d)
-  const alpha = clamp(px.div(1.2), 0.0, 1.0).mul(select(aLed.x.lessThan(0.5), uniforms.uSteel, 1.0)).toVar()
+  const alpha0 = clamp(px.div(1.2), 0.0, 1.0).mul(select(aLed.x.lessThan(0.5), uniforms.uSteel, 1.0))
   const dir = normalize(wo.sub(wp))
   const side = normalize(cross(dir, normalize(cameraPosition.sub(wp))))
   // 外の塗り（paint.ts）の flat: 外周の LED の帯（kind 2）は、外の弦材の鋼管（半径 0.42m）の手前へ 0.6m 出す（鋼管に隠れて帯が縁しか見えなかった）
-  const lift = flat ? select(aLed.x.greaterThan(1.5), normalize(cameraPosition.sub(wp)).mul(0.6), vec3(0.0)) : vec3(0.0)
+  // 近く（ゴンドラの中など。30m まで）は出さず、帯もうすく消す（カメラの前に幅 0.9m の板が浮いて見えた）
+  const rimNear = flat ? select(aLed.x.greaterThan(1.5), smoothstep(12.0, 30.0, d), float(1.0)) : float(1.0)
+  const lift = flat ? select(aLed.x.greaterThan(1.5), normalize(cameraPosition.sub(wp)).mul(smoothstep(30.0, 60.0, d).mul(0.6)), vec3(0.0)) : vec3(0.0)
+  const alpha = (flat ? alpha0.mul(rimNear) : alpha0).toVar()
   const moved = wp.add(side.mul(aSide).mul(w).mul(0.5)).add(lift)
   const clip = cameraProjectionMatrix.mul(cameraViewMatrix).mul(vec4(moved, 1.0))
   m.vertexNode = select(alpha.lessThan(0.001), vec4(0.0, 0.0, -2.0, 1.0), clip)

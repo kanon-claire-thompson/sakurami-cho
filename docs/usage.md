@@ -30,7 +30,7 @@ minor の版を上げる。
 | core | `LAB_PLACEMENTS`・型 `LabPlacement`・`labAnchor`・型 `LabAnchorData` | ラボの置き場所の表（地図の既定。使う側が足した表を react の `TownRoot` の `placements` に渡す）とアンカーを引く |
 | world | `createTown`・型 `Town`・`TownCreateOptions`・`TownStatus`・`TownClock`・`TownFocus`・`TownFrame`・`TownEventMap` | 町の口（1 ページに 1 つ。根の [README](../README.md) の「自分のアプリに入れる」）と、その引数・読み込みの状態・時計・注目点・毎コマの段（`begin`・`update`・`view` の引数）・出来事 |
 | world | `PALETTE`・`FONTS` | 背景と霧の色・ラボの看板と画面のフォント（下の「フォント」） |
-| world | `configureLab` | ラボの差し込み口（什器の入力の値・差し込み口の中身・画面の描き方・床の映り込みを描くか `floorReflection`。下の「ラボの素材の名前と床の映り込み」） |
+| world | `configureLab` | ラボの差し込み口（什器の入力の値・差し込み口の中身・画面の描き方） |
 | world | `createFollowCamera`・型 `FollowCamera`・`FollowCameraOptions`・`FollowTarget` | 人を追うカメラ（下の「カメラ・直接の操作・ワープ」） |
 | character | `createCharacter`・型 `Character`・`CharacterOptions`・`CharacterSpawnPoint`・`CharacterDriver` | キャラクター（1 人ずつのインスタンス）と、毎コマ動かす所（`ch.drivers.motion`・`travel`）の型 |
 | character | `createCharacterVisual`・型 `CharacterVisual`・`CharacterVisualOptions`・`CharacterVisualStatus`・`CharacterVisualClip`・`VISUAL_DEFAULTS`・型 `VisualConfig` | 見た目（VRM と待機・歩き・跳ぶ・身ぶりの `.vrma`）と既定の値。`CharacterVisual` の `start()`・`stop()`・`update()`・片付ける `dispose()` |
@@ -63,65 +63,86 @@ minor の版を上げる。
 LOST（消灯し、外周の表示灯が琥珀色）は `core: 0`・`amber: 1`。呼吸・明滅の形（時間の動き）は地図では決めず、使う側が毎コマの値で作る。
 既定の 1・0 では前と同じ見た目（反射用の環境の光る板は、コアの明るさで変えない）。
 
-## ラボの素材の名前と床の映り込み
+## アニメ塗り
 
-使う側がラボの見た目を自分の素材に差し替える（トゥーン調・アニメ塗りなど。kanon-stream-video の `src/scene/anime/`）ための口。地図の既定の見た目は変えない。
+地図の見た目はアニメ塗りだけ（前のリアル寄りの見た目と、町の塗りを差し替える口 `configureOutdoorPaint`・ラボの床の映り込み `floorReflection` は
+2026-10-20 に無くした）。置き場は `world/anime/`（町とラボ）・`character/avatar/vrmAnime.ts`（VRM）・`react/AnimeView.tsx`（R3F の包み）。
+R3F の包みを使えば、使う側がすることは `<AnimeRender />` を置くかどうか（下の「輪郭線」）と、VRM の材質ごとの上書き（任意）だけ。
 
-- ラボの光を受ける素材（`MeshStandardMaterial`・`MeshPhysicalMaterial`）には、どれも名前（`material.name`）が付いている。共有の素材は
-  `world/materials/labMaterials.ts` の欄の名前（`wallPanel`・`darkMetal`・`steel` など）、殻と什器がじかに作る物は役割の名前（`wallBacking`・`ceiling`・
-  `mezzanineFloor`・`floorSeam`・`visionGlass`・`cuttingMat`・`keycap`・`mugCeramic`・`pottingSoil`・`leaf` など）。床は `labFloorReflector`（映り込み）か `labFloor`。
-  使う側は色ではなく名前で引く（同じ名前の素材は同じ役割。`test/lab-kits.test.ts` が名前の無い素材が無いことを確かめる）。動かない物を合わせた mesh の名前は `static:<素材の名前>`
-- 床の映り込み（品質 high）は、`configureLab({ floorReflection: false })` で作った時から止められる（毎コマ場面をもう 1 回描く・ぼかす仕事をしない。
-  床は映り込みの無い PBR の床 `labFloor`）。あとから `lab.shell.floor.setReflection(on)` でも切り替えられる（`lab.shell.floor.reflection` が今の状態）。既定は描く
+### 町の塗り（`world/anime/townPaint.ts`）
 
-## 外の塗り（`configureOutdoorPaint`）
+町・空・水・地形・建物・木・乗り物・名前のある建物とその中・ラボの外観の材質は、材質を組み立てるとき（シェーダーを作るとき）に外の塗り
+（`world/outdoor/paint.ts` の `outdoorPaint()` が返す `TOWN_PAINT`）の式を呼ぶ。太陽・空の光・空気の色は `outdoorUniforms`（時刻で連続に変わる）を元に、
+それを次のように描き替える（HDR の色のまま。外へ出たときの自動露出・ラボの窓からの明るさの釣り合いのため）:
 
-使う側が町の見た目を自分の塗り（アニメ塗りなど。kanon-stream-video の `src/scene/anime/town.ts`）に差し替えるための口。地図の既定の見た目は変えない:
-塗りを入れなければ（呼ばない・`null`）、どの材質も前とまったく同じ式を組む。
+- 光（`light`）: 光の当たる側（太陽 × keyGain + 空の光 × skyGain。夜は月の光）と影（光の当たる側 × 青紫・藍の影の色）の 2 段。境目は面の向きと町の太陽の影の地図。
+  木と草は 3 段。面の色は彩度を上げる。面の種類 `PaintSurface`（`ground`・`wall`・`roof`・`frame`・`structure`・`tree`・`grass`・`prop`・`named`・`site`・`vehicle`・`dome`・`other`）を受ける
+- 空（`sky`・`skyDome`）: 空の色の元（`world/outdoor/materials.ts` の `skyColorBase`）を高さの帯で塗り分け、雲は形のはっきりした塊（夕方は縁が金）、太陽と月は平らな円（月は満ち欠け）
+- 空気遠近（`haze`）・窓（`window`。昼は空の色の平らなガラスと斜めの帯、夜は点いた窓の暖色、1 階の店はショーウィンドウ）・水（`water`。平らな色と空の帯の映り・形の決まった帯）・
+  滝と霧（`fall`・`particle`）・灯りが照らす面（`lampFalloff`・`lampLight`。2 段の光だまり）・光の点（`glow`）・中のある建物の中（`interior`。照度を 2 段）・
+  光る物（`emit`）・透けるガラス（`glass`）
+- 細かい模様は描かない（質感の写真・汚れ・まだら・窓の奥の部屋とカーテン・映り込み・つやの照り返し）。形の決まった模様（窓の格子・枠・店の看板の帯・棟の帯・ベランダの床）は残す。
+  看板の文字は画を組んだ文字の形（`world/outdoor/glyph.ts`。夜は板と文字を分けて光らせる）、観覧車の LED はスポークを流れる琥珀の帯と外周の潮位の帯、
+  停留所の屋根の下の灯りの板は金属の天井板と丸い灯りの並び
 
-- 入れるのは町の材質を作る前（`createTown` のあと、描き始める前）。材質を組み立てるとき（シェーダーを作るとき）に読むので、作り終えた材質はあとから替わらない
-- 式はどれも省ける（省いた式は前の式のまま）。式は TSL のノードを組む関数（呼んだ所に式が入る）。配色や時刻の値は、使う側が自分の uniform を作って式の中で読む。
-  前の式は `world/outdoor/materials.ts` の `skyColorBase`・`outdoorHazeBase`・`outdoorShadeBase`・`fbm`、`world/outdoor/town/facades.ts` の `townLightBase` として読める
-  （例: 前の空の色を高さの帯で塗り分ける）。太陽・空の光・空気の色は `outdoorUniforms`（時刻で連続に変わる）
-
-| 式 | 代わる物 | 引数 → 戻り値 |
-|---|---|---|
-| `light` | 太陽と空の光（`townLight`・`outdoorShade`。地面・建物・木・小物・構造物・名前のある建物・乗り物・ラボの外観） | 面の色・法線・環境光の遮り・太陽の影（1 = 日なた）・面の種類 `PaintSurface` → HDR の色 |
-| `haze` | 空気遠近（`outdoorHaze`） | 色・世界の位置 → 色 |
-| `sky` | 空の色（`skyColor`。空の球と、ガラス・水・車体の映り込み） | 向き → 色 |
-| `skyDome` | 空の球の雲と太陽の円盤 | 向き・`sky` の色 → 色 |
-| `window` | 窓のガラス（`flat` のとき。名前のない建物と名前のある建物） | 点いている度合い・灯りの色・面の法線・視線・窓の中の位置（0〜1）・店の正面のガラスか（1 / 0。名前のない建物の 1 階の店先と、名前のある建物の店・喫茶のガラス。省く呼び方もある）→ 色 |
-| `water` | 海・川・運河・池の水面（`flat` のとき） | 波の法線・視線・位置・海か・映った灯り → 色（空気遠近の前） |
-| `lampFalloff` | 街灯・提灯・店先の灯りが面を照らす強さの減り方（灯り 1 つごと） | 前の減衰・強さ・距離・届く距離 → 減衰 |
-| `lampLight` | 灯りが照らした面の色（前の 面の色 × 照度。建物の壁・地面・名前のある建物・小物・地形） | 面の色・灯りの照度の和（色込み）→ 色 |
-| `glow` | 光の点（町の灯り・遠くの窓明かり）の芯とにじみの形 | 点の中心からの距離・芯の半径 → 明るさの倍率 |
-| `interior` | 中のある建物の中の光（拡散）。`flat` のときは乗り物の車室・観覧車のゴンドラ・駅員ロボの中の面も | 面の色・照度の和・部屋のまわりの明るさ・法線・環境光の遮り → 色 |
-| `emit` | 光る物の色（看板の文字・灯具・信号・前照灯・行き先と案内の表示・LED・ネオン・観覧車の LED・ドームの葉脈・灯台の光の帯） | 前の光の色（HDR。強さ込み）→ 色 |
-| `glass` | 透けるガラス（`flat` のとき。乗り物の窓・ゴンドラ・ショーウィンドウ・扉・ラボの外観のガラス・中のある建物とドームのガラス） | 見ている側の法線・視線・位置・向こうの灯りの色 → 色と透け（vec4） |
-| `fall` | 流れ落ちる滝（`flat` のとき。ガーデンドームの大滝「天の水」・回廊の細い滝）。入れなければ地図の flat の筋（2 段の平らな白） | 幕の横の位置（0〜1）・落ちた割合（0〜1）・幕の長さ（m）・時刻（秒）・水の白に掛ける光 → 色と不透明度（vec4。空気遠近の前） |
-| `particle` | 霧・しぶきの粒の形（`flat` のとき。ドームの霧の噴霧・滝つぼのしぶき）。入れなければ地図の flat の丸（縁のくっきりした 2 段のうすさ） | 粒の中心からの距離の 2 乗・しぶきか（1 / 0）→ 不透明度の倍率 |
-| `flat` | 細かい模様を省く | `true` で、質感の写真・汚れ・まだら・窓の奥の部屋とカーテン・水面の映り込み・つやの照り返しを描かない（窓の格子・枠・看板の帯・棟の帯は残す）。乗り物・小物・草・ドームの植物と水・霧も平らな色の塗り分け（光る模様は形のくっきりした 2 段）にし、看板の木目も描かない。ほかに `flat` のときだけ: 看板の文字（店の看板の帯・袖看板）は画を組んだ文字の形（`world/outdoor/glyph.ts`。夜は板と文字を分けて光らせる。画は 1 画素の幅の箱で平均する（`glyph` の 4 つ目の引数 `fw` = 升の中の位置の `fwidth`。切りっぱなしの画は数 m 先から画素の間に落ちたり乗ったりしてチカチカした））、観覧車の LED はスポークを流れる琥珀の帯と外周の潮位の高さまでの帯（外周の帯は鋼管の手前に出す）、停留所の屋根の下の灯りの板は金属の天井板と丸い灯りの並び、ドームの中の植物はまわりの明るさを強めに足し・葉脈の光る筋は太めに・池は浅い縁の帯と葉脈の緑の映り |
+時刻の配色（`TOWN_TIMES`: 昼・朝・夕・宵・夜・夜中。重みは太陽の高さと夜中の度合いから `townWeights`）は、毎コマ `updateTownPaint(outdoor)` が混ぜて
+`townPaintUniforms` に書く（react の `TownView` の中の `LabAnimeView` が呼ぶ）。CPU で町の光を読む口: `townKeyDisplay`（町の光の当たる側と影の色。画面のリニア）・
+`interiorKeyDisplay`（中のある建物の部屋の光）・`acesDisplay`（three の ACES を CPU で）。町に連れ歩く物の塗りを町に合わせるのに使う（kanon-stream-video の KB-001）。
 
 町の灯りの照度を CPU で読む口: `world/outdoor/town/lamps.ts` の `lampLightAt(x, y, z, 色, 向き)`（灯りの表の升の灯りの照度の和と、灯りへの向き。
-人物に町の灯りの色を乗せるのに使う。kanon-stream-video のアニメ塗りの花音）。
+VRM の合わせが人に町の灯りの色を乗せるのに使う）。
 
-面の種類（`PaintSurface`）は `ground`・`wall`・`roof`・`frame`（窓枠・雨戸）・`structure`・`tree`・`grass`・`prop`・`named`・`site`・`vehicle`・`dome`・`other`。
-配色の表を物ごとに引くのに使う。
+材質には塗りの印を付ける（`material.userData` の `PAINT_MARK`（`'outdoorPaint'`）に、塗りの種類 `light`・`flat`・`window`・`water`・`sky`・`interior`・
+`glow`（意図して平らに光らせる物）・`helper`。`world/outdoor/paint.ts` の `markPaint`）。描き方は変えない。使う側は場面の材質を巡って、印の無い物を見つけられる
+（kanon-stream-video の `src/scene/anime/audit.ts`）。
 
-塗りを入れている間、地図は塗りの口を通した材質に印を付ける（`material.userData` の `PAINT_MARK`（`'outdoorPaint'`）に、塗りの種類 `light`・`flat`・`window`・`water`・`sky`・`interior`・
-`glow`（意図して平らに光らせる物）・`helper`。`world/outdoor/paint.ts` の `markPaint`）。描き方は変えない。使う側は場面の材質を巡って、印の無い物（塗りを通っていない物）を見つけられる
-（kanon-stream-video の `src/scene/anime/audit.ts`）。塗りを入れなければ印は付かない。
+### ラボの塗り（`world/anime/labAnime.ts`・`material.ts`・`palette.ts`）
+
+ラボの殻と什器は、素材の表（`MeshStandardMaterial`・`MeshPhysicalMaterial`。色・金属の度合い・透け・名前だけ。質感の写真は持たない）で作り、描くときに
+アニメ塗りの素材（光の計算をしない `MeshBasicNodeMaterial`）に差し替える（`labAnime()`。ページに 1 つ）:
+
+- 下地は素材の名前で役割を引く（`palette.ts` の `BY_NAME`・`ANIME_PALETTE`。名前の無い・表に無い物は元の色から）。素材の名前は `world/materials/labMaterials.ts` の欄の名前
+  （`wallPanel`・`darkMetal`・`steel` など）と、殻と什器がじかに作る物の役割の名前（`wallBacking`・`ceiling`・`labFloor` など。`test/lab-kits.test.ts` が名前の無い素材が無いことを確かめる）
+- 時刻の配色（`ANIME_TIMES`: 昼・夕・夜・夜中）× 下地、キーライトの向きとの 2 段の影、物が落とす影（`keyShadow.ts`。動かない物は向きが変わったときだけ・動く物は毎コマ）、
+  ネオンの照り返し（`neon.ts`。ラボの照明の色の付いた光を拾う）、金属の縁。色は画面に出る色で書き、ACES の逆に通す
+- 差し替えた物には輪郭線の層（`OUTLINE_LAYER`）と影を落とす物の層を足す。差し込み口（`slot:`）の中は触らない
+- 使う側の物も同じく塗れる: `labAnime().convertMesh(mesh, 動く物か, 色の式?)`（色の式を渡せば配色を自分の値に。kanon-stream-video は KB-001 を町の光に合わせる）。
+  `labAnime().auto = false` で時刻の配色を書かない（手で値を書いて確かめる）
+
+### VRM の合わせ（`character/avatar/vrmAnime.ts`）
+
+町の注目点の人（`town.setFocus` に渡した `Character`）の VRM の MToon を、読み込んだあとに合わせる（`LabAnimeView` が `applyVrmAnime`。VRM のファイルは変えない）。
+どの VRM にも既定の値（`VRM_ANIME`）で効く:
+
+- 明暗の向き: 光ごとの向きでなく 1 つの向き（ラボではラボのキーライト、町では町の光の向き。中のある建物の中は部屋の灯りと窓）で分ける。光ごとの向きは明るさにだけ効かせる
+- 外にいる間は、近くの町の灯りの照度の和（`lampLightAt`）をその色のまま足す。光の色の鮮やかさ・光の和の膝（knee）・時刻ごとの露出と夜の外の露出・光の当たる側の時刻の色の照り
+- 影の色を青紫へ寄せ、明暗の境をくっきり。縁の光を弱く。MToon の outline は太さ 0（後処理の線を引く）。ライトの影の地図を受けない
+- 輪郭線の層と、部位の推定（材質の名前から: 目・眉・まつ毛・レンズは合わせず線も引かない、肌・顔・口・髪は顔の線（内側の折れなし）・縁の光なし・肌は弱く合わせる、
+  ほかは材質ごとに部位の番号を振って境目に線を引く。VRoid の名前（`N00_000_00_EyeIris_00_EYE` など）と、よくある名前）
+- 材質ごと・mesh ごとの上書き: `configureVrmAnime({ material: (名前) => ({ keep, weight, shift, shadeLift, noRim }), line: (mesh, 名前) => ({ none, face, id }) })`
+  （VRM を読み込む前に。返さなければ推定。kanon-stream-video の花音は材質の名前で決めた表を入れる）
+
+光の値（明暗の向き・灯り・露出）はページに 1 組（注目点の人に合わせる）。
+
+### 輪郭線（`world/anime/outline.ts`）
+
+後処理の線: ラボの物と人（層 `OUTLINE_LAYER` の物）は、層だけを法線と深さで描き直して外形と折れの線、町（層の外 = 窓の外・外の町）は場面の深さだけで外形と角の線
+（`townLineEdge`。遠くほど細く薄く・光る物には引かない）。線の色は面の色を暗くして色味を付けた色。値は `OUTLINE`。
+
+- 後処理を組まないアプリ: react の `<AnimeRender antialias? />` を `gl.render` の代わりに置く（場面 → 輪郭線 → レンダラのトーンマッピングと露出 → SMAA。優先度 1）
+- 後処理を組むアプリ: `animeOutline(色, 場面の viewZ, 場面の深さ, scene, camera, 画素の比)` を自分の RenderPipeline の中に入れる（毎コマ `update(camera)`。kanon-stream-video の `src/scene/Effects.tsx`）
+
+### 細かい模様・細い形
 
 細かい模様は 1 画素の幅で平均する（カメラが動いてもチカチカしないように。kanon-stream-video の `scripts/flicker-check.mjs` で見つけた物）:
-看板の文字の画（`glyph` の `fw`）、乗り物の行き先の表示の橙の点と文字の升（`transit/transitMaterial.ts`。点・升が画素より細かくなる遠くでは平均の明るさ。
-塗りを入れても入れなくても）。使う側の塗りの式（`window`・`glow` など）も、模様の線・点は `fwidth` で平均するとよい（細い線・点を `step` で切ると、
-数 m 先から画素の間に落ちたり乗ったりする）。
+看板の文字の画（`glyph` の `fw`）、乗り物の行き先の表示の橙の点と文字の升（`transit/transitMaterial.ts`。点・升が画素より細かくなる遠くでは平均の明るさ）、
+窓・店のガラスの線と棚・光の点（`townPaint.ts` の `cover`・`glow`）。模様の線・点を `step` で切ると、数 m 先から画素の間に落ちたり乗ったりする。
 
-細い形は、`flat` のとき、画素より細くなる遠くで画素の幅まで太らせる（`world/outdoor/thin.ts`）: 名前のある建物の細い角柱（格子の桟・手すりの子柱・細い腕。
+細い形は、画素より細くなる遠くで画素の幅まで太らせる（`world/outdoor/thin.ts`）: 名前のある建物の細い角柱（格子の桟・手すりの子柱・細い腕。
 断面が 6cm 以下で長さがその 3 倍以上の箱。`named/kitBuilder.ts` の `box` が頂点に `aThin` = 細い向きの中心の線からの差と断面の半分の幅を書き、
 `namedMaterial.ts` の頂点の式 `thinWidened` が中心の奥行きでの 1 画素の大きさまで広げる）・小物の細い箱（ベランダの手すりの子柱・アンテナ。`town/props.ts` の
 `thinSize`）・小物の手すりの塗りで抜く格子（`barHalfWidth`）。広げるのは断面が画素より細い所だけ（8 倍まで）で、近くは前と同じ形。三角形が画素より細いと、
-画素の中心に乗ったり外れたりして線が切れたり出たりする（塗りの式では平均できない）。塗りを入れなければ前と同じ（`aThin` は形に入るが読まない）。
+画素の中心に乗ったり外れたりして線が切れたり出たりする（塗りの式では平均できない）。
 
 形を捨てるときは `world/dispose.ts` の `disposeGeometries`（Sprite の形は捨てない。three の全部の Sprite が 1 つの形を共有するので、1 つを捨てると
 ほかの Sprite が壊れたバッファで描き続けて、WebGPU の送りが毎コマ捨てられる）。
@@ -129,9 +150,10 @@ LOST（消灯し、外周の表示灯が琥珀色）は `core: 0`・`amber: 1`�
 ## 毎コマの順
 
 毎コマの順（R3F の `useFrame` の優先度。小さい方が先。例のアプリの `src/scene/Scene.tsx`）: 町の時計 `<TownClock>`（−90）→ 乗る仕組み `<RideDriver>`（−79）→
-歩きを進める `updateLocomotion(ch, t, min(dt, 0.1))`（−58）→ 遠景と外の光 `<TownView>` の `town.update`（−50）→ 追うカメラ `cam.update(ch, 目の高さ, dt)`（−1）→
-ラボ・殻・什器 `<TownView>` の `town.view` と見た目 `<CharacterView>`（0）→ 露出 `<TownExposure>`（0.95）→ 描く（1。0 より大きい優先度の購読があると R3F は自分で描かないので、
-使う側が `gl.render` する）。ラボの形はテクスチャを読み終えてから `<Suspense>` の中の `<TownRoot town={town}>` が作る（`placements` を省けば地図の既定の置き場所の表）。
+歩きを進める `updateLocomotion(ch, t, min(dt, 0.1))`（−58）→ 遠景と外の光 `<TownView>` の `town.update`（−50）→ アニメ塗り `<TownView>` の中の `<LabAnimeView>`
+（−45。ラボの塗りの見直し・ラボと町の時刻の配色・注目点の人の VRM の合わせと光）→ 追うカメラ `cam.update(ch, 目の高さ, dt)`（−1）→
+ラボ・殻・什器 `<TownView>` の `town.view` と見た目 `<CharacterView>`（0）→ 露出 `<TownExposure>`（0.95）→ キーライトの影の地図 `<LabAnimeView>`（0.98）→
+描く（1。0 より大きい優先度の購読があると R3F は自分で描かないので、使う側が `<AnimeRender />` を置くか、自分の後処理で描く）。ラボの形はテクスチャを読み終えてから `<Suspense>` の中の `<TownRoot town={town}>` が作る（`placements` を省けば地図の既定の置き場所の表）。
 `town.frame(f)`（4 つの段を続けて呼ぶ）は人を動かさない使い方だけ（乗る仕組みと歩きは `begin` と `update` の間、カメラは `view` の前でないといけないため）。
 
 ## 描く物を減らす仕組み（WebGPU）
@@ -195,7 +217,7 @@ Orbitron の 500・700・900 を最大 3 秒待つ。町の看板・名前のあ
 ```
 <アセットの根>/
   town/                 町の地図データ（manifest.json・walk.json・named.json・infra.json・terrain/・ground/・tiles/）
-  textures/             町・ラボ・敷地のテクスチャ（town/・lab_exterior/・concrete_floor/ など）
+  textures/             町・ラボのテクスチャ（town/・perforated_metal/）
   models/animations/    待機・歩き・跳ぶ .vrma（使う側の身ぶりなどの .vrma も、使う側のアセットの根のここに置ける）
 ```
 
@@ -216,7 +238,7 @@ Orbitron の 500・700・900 を最大 3 秒待つ。町の看板・名前のあ
 
 | 置き場 | git | 作り方 |
 |---|---|---|
-| `assets/textures/` | 入れる | CC0 の PBR テクスチャ（Poly Haven・ambientCG）。出典は [assets/textures/CREDITS.md](../assets/textures/CREDITS.md) |
+| `assets/textures/` | 入れる | CC0 のテクスチャ（ambientCG。パンチングメタルの穴の形・中のある建物の床の木目・葉の形）。出典は [assets/textures/CREDITS.md](../assets/textures/CREDITS.md) |
 | `assets/town/` | 入れる | `tools/sync-town.mjs` が、設定資料の町の地図データ（このリポジトリには入れていない元のデータ）から書き出す（151 ファイル・約 25MB） |
 | `assets/models/animations/` | 入れる | `tools/sync-anim.mjs` が自由に使える素材から作る（キャラクターの見た目が既定で使う待機 `idle.vrma` と切り替える待機 `idle-2.vrma`〜`idle-4.vrma`・歩き `walk.vrma` と、跳ぶ `jump-start.vrma`・`jump-loop.vrma`・`jump-land.vrma` の 8 つ）。出典は [assets/models/animations/CREDITS.md](../assets/models/animations/CREDITS.md) |
 

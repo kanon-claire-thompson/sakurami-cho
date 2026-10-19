@@ -709,7 +709,7 @@ describe('地図のパッケージ（入口ごとの決まり）', () => {
     const section = mdSection('README.md', 'ライセンス')
     expect([...section.matchAll(/^\| `([^`]+)` \|/gm)].map((m) => m[1])).toEqual([...CC_BY_NC_PATHS])
     expect(CC_BY_NC_PATHS.filter((p) => filesOfPattern(p).length === 0)).toEqual([])
-    for (const w of ['CC BY-NC 4.0', '(LICENSE-DATA)', 'MIT', '(LICENSE-CODE)', '(LICENSE)', '株式会社0235', 'assets/textures/', 'assets/models/animations/', 'world/lab/shell/floor.ts']) expect(section).toContain(w)
+    for (const w of ['CC BY-NC 4.0', '(LICENSE-DATA)', 'MIT', '(LICENSE-CODE)', '(LICENSE)', '株式会社0235', 'assets/textures/', 'assets/models/animations/']) expect(section).toContain(w)
     expect(section).toContain(CHARACTER_GUIDELINE)
     // 他の人の素材の出典がある
     for (const f of ['assets/textures/CREDITS.md', 'assets/models/animations/CREDITS.md']) expect(existsSync(join(ROOT, f))).toBe(true)

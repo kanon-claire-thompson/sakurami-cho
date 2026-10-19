@@ -4,6 +4,10 @@
 （VRM）を動かす仕組み、React Three Fiber（R3F）の薄い包み、地図データを書き出す道具が入っている。
 好きな VRM を読み込んで町じゅうを歩き回れる例のアプリ（`examples/town-walker`）も付いている。
 
+見た目はアニメ塗り（`world/anime/`）: 町・空・水・建物・木・乗り物・名前のある建物とその中は、時刻で配色が変わる平らな塗り（くっきり 2 段の影・帯の空・
+形のある雲・平らな窓と水・2 段の光だまり）、ラボは下地と 2 段の影・物が落とす影・ネオンの照り返し・金属の縁、どちらにも輪郭線。読み込んだ VRM の MToon も
+ラボと町の光に合わせる（[docs/usage.md](docs/usage.md) の「アニメ塗り」）。前のリアル寄りの見た目は 2026-10-20 に無くした（git の履歴に残る）。
+
 - npm には出していない（下の「自分のアプリに入れる」）
 - ライセンスはコードが MIT、町の地図データと設定資料をコードの形で書いた物が CC BY-NC 4.0（下の「ライセンス」）
 
@@ -49,6 +53,9 @@ setWarpPermit((c) => c === walker)             // 町の時計を早送り・カ
 town.on('outsideness', (k) => walker.setRimBlend(k))
 ```
 
+R3F で描くときは、`sakurami-cho/react` の `<TownView />` がアニメ塗り（ラボの素材の差し替え・時刻の配色・影の地図・注目点の人の VRM の合わせ）を動かす。
+後処理を自分で組まないなら、`gl.render` の代わりに `<AnimeRender />` を置く（輪郭線を引いて、トーンマッピングと SMAA をかけて描く。例のアプリの `src/scene/Scene.tsx`）。
+
 アセット（`assets/`）は、使う側が自分の public の根と同じ URL で出し、その URL を `assetBase` に渡す（[docs/usage.md](docs/usage.md) の「assetBase の約束」「アセット」）。
 
 ## 中身
@@ -80,7 +87,7 @@ CI（GitHub Actions）が push と pull request のたびに、型の確かめ�
 
 ## 資料
 
-- [docs/usage.md](docs/usage.md): 組み込む人向け。公開の口の表・毎コマの順・フォント・落とした VRM・カメラ・直接の操作・ワープの部品・データの形の版・assetBase の約束・アセットの並び
+- [docs/usage.md](docs/usage.md): 組み込む人向け。公開の口の表・アニメ塗り（町の塗り・ラボの塗り・輪郭線・VRM の合わせ）・毎コマの順・フォント・落とした VRM・カメラ・直接の操作・ワープの部品・データの形の版・assetBase の約束・アセットの並び
 - [docs/tools.md](docs/tools.md): 地図データ・アニメーションを書き出す道具の引数・素材から `.vrma` を作る変換・`package.json` の script
 
 ## ライセンス
@@ -89,9 +96,8 @@ CI（GitHub Actions）が push と pull request のたびに、型の確かめ�
 
 - 下の表のパスは **CC BY-NC 4.0**（[LICENSE-DATA](LICENSE-DATA)。Creative Commons Attribution-NonCommercial 4.0 International の legal code の全文）
 - それ以外のコードは **MIT**（[LICENSE-CODE](LICENSE-CODE)。Copyright (c) 2026 株式会社0235）
-- 他の人の素材は、その出典（CREDITS）とファイルの頭の注記のライセンス: `assets/textures/` は CC0（[assets/textures/CREDITS.md](assets/textures/CREDITS.md)）、
-  `assets/models/animations/` は MIT・CC0（[assets/models/animations/CREDITS.md](assets/models/animations/CREDITS.md)）、
-  `world/lab/shell/floor.ts` の床の映り込みのぼかしと混ぜ方は drei から写した MIT（ファイルの頭の注記）
+- 他の人の素材は、その出典（CREDITS）のライセンス: `assets/textures/` は CC0（[assets/textures/CREDITS.md](assets/textures/CREDITS.md)）、
+  `assets/models/animations/` は MIT・CC0（[assets/models/animations/CREDITS.md](assets/models/animations/CREDITS.md)）
 
 CC BY-NC 4.0 にする物（町の地図データと、設定資料をコードの形で書いた物）:
 

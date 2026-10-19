@@ -10,6 +10,7 @@ import { labTextureUrls, type LabFloorTextures, type LabTextureUrls } from '../w
 import type { LabTextures } from '../world/materials/labMaterials'
 import { townOptions, type TownFrame } from '../world/townHost'
 import { LabContext, LabMaterialsContext, useLab } from './labHooks'
+import { LabAnimeView } from './AnimeView'
 
 /**
  * 町の R3F の薄い包み（docs/design/map-split.md §7 の「5-6 で作った形」。案の §2.5）。中身は three の形の町の口（world/createTown.ts）で、
@@ -130,7 +131,8 @@ export function TownRoot({ town, children, placements }: { town: Town; children:
 
 /**
  * ラボの照明・外の光・遠景・殻・什器（前の LabLights・OutdoorLighting・Landscape・LabShell・LabKits の位置。TownRoot の最初の子に置く）。
- * 場面の木の並びは前と同じ: 照明の群 → 太陽 → 太陽の target → 空の光 → trigger → 遠景の根 → 殻 → 什器の群
+ * 場面の木の並びは前と同じ: 照明の群 → 太陽 → 太陽の target → 空の光 → trigger → 遠景の根 → 殻 → 什器の群。
+ * 中にアニメ塗りの LabAnimeView（AnimeView.tsx。ラボの殻と什器の塗り・時刻の配色・キーライトの影の地図・注目点の人の VRM の合わせ）も置く
  */
 export function TownView() {
   const town = useTown()
@@ -153,6 +155,8 @@ export function TownView() {
       <primitive object={lab.kits.object} />
       {/* 什器が見えないコマを調べる箱（何も描かない。world/lab/labCull.ts） */}
       <primitive object={lab.cull.proxy} />
+      {/* アニメ塗り（ラボの殻と什器の素材の差し替え・時刻の配色・影の地図と、注目点の人の VRM の合わせ。AnimeView.tsx） */}
+      <LabAnimeView />
     </>
   )
 }

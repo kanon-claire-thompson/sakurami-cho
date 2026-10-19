@@ -237,6 +237,7 @@ const PUBLIC_API: Record<'core' | 'world' | 'character', readonly string[]> = {
   character: [
     ...['createCharacter', 'CharacterOptions', 'CharacterSpawnPoint', 'Character', 'CharacterDriver'],
     ...['createCharacterVisual', 'CharacterVisual', 'CharacterVisualClip', 'CharacterVisualOptions', 'CharacterVisualStatus', 'VISUAL_DEFAULTS', 'VisualConfig'],
+    ...['configureVrmAnime', 'VRM_ANIME', 'VrmAnimeLineRule', 'VrmAnimeMaterialRule', 'VrmAnimeOverrides'],
     ...['goTo', 'placeAt', 'stopWalking', 'updateLocomotion', 'configureNav', 'NavConfig'],
     ...['driveRides', 'setWarpPermit', 'RideTime', 'advanceWheelTo', 'beginWheelBoarding', 'cancelWheelBoarding', 'requestWheelAlight', 'WHEEL_EXIT_OPEN_DEG', 'wheelBoardProblem', 'wheelProblemText', 'WheelProblem'],
     ...['cancelTravel', 'driveTravel', 'isTravelProblem', 'startTravel', 'traveling', 'travelProblemText', 'travelState', 'TravelCut', 'TravelPlan', 'TravelProblem', 'TravelRequest', 'TravelRouteId', 'TravelTime'],

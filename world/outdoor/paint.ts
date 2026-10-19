@@ -1,4 +1,5 @@
 import type * as THREE from 'three/webgpu'
+import { TOWN_PAINT } from '../anime/townPaint'
 
 type Node<T = unknown> = THREE.Node<T>
 type F = Node<'float'>
@@ -112,28 +113,37 @@ export interface OutdoorPaint {
   flat?: boolean
 }
 
-let paint: OutdoorPaint | null = null
+/** 入れた外の塗り（undefined = 入れていない。既定の町のアニメ塗り TOWN_PAINT。モジュールの読み込みの順に頼らないよう、読むときに決める） */
+let configured: OutdoorPaint | null | undefined
 
 /**
  * 外の塗りを入れる（材質を作る前に 1 回。null で前の見た目に戻す。作り終えた材質は変わらない）
  */
 export function configureOutdoorPaint(next: OutdoorPaint | null) {
-  paint = next
+  configured = next
 }
 
-/** 今の外の塗り（入れていなければ null。材質を組み立てるときに読む） */
+/** 今の外の塗り（既定は町のアニメ塗り world/anime/townPaint.ts の TOWN_PAINT。材質を組み立てるときに読む） */
 export function outdoorPaint(): Readonly<OutdoorPaint> | null {
-  return paint
+  return configured === undefined ? TOWN_PAINT : configured
 }
+
+const paintNow = () => outdoorPaint()
 
 /** 細かい模様を省くか（材質を組み立てるときに読む） */
-export const paintFlat = () => paint?.flat === true
+export const paintFlat = () => paintNow()?.flat === true
 
 /** 光る物の色（外の塗りの emit を入れていれば、それを通す。入れていなければ col のまま） */
-export const paintEmit = (col: V3): V3 => (paint?.emit ? paint.emit(col) : col)
+export const paintEmit = (col: V3): V3 => {
+  const p = paintNow()
+  return p?.emit ? p.emit(col) : col
+}
 
 /** 灯りが照らした面の色（外の塗りの lampLight を入れていれば、それを通す。入れていなければ albedo × 照度） */
-export const paintLampLight = (albedo: V3, E: V3): V3 => (paint?.lampLight ? paint.lampLight(albedo, E) : albedo.mul(E))
+export const paintLampLight = (albedo: V3, E: V3): V3 => {
+  const p = paintNow()
+  return p?.lampLight ? p.lampLight(albedo, E) : albedo.mul(E)
+}
 
 /**
  * 材質に付ける塗りの印の名前（material.userData のキー）。外の塗りを入れているときだけ、塗りの口を通った材質に付ける（使う側の監査が読む。
@@ -149,6 +159,6 @@ export type PaintMarkKind = 'light' | 'flat' | 'window' | 'water' | 'sky' | 'int
 
 /** 材質に塗りの印を付ける（外の塗りを入れていなければ何もしない）。材質を返す */
 export function markPaint<M extends { userData: Record<string, unknown> }>(m: M, kind: PaintMarkKind): M {
-  if (paint) m.userData[PAINT_MARK] = kind
+  if (paintNow()) m.userData[PAINT_MARK] = kind
   return m
 }

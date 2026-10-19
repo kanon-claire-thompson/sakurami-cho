@@ -9,7 +9,7 @@ import { QUALITY } from './quality'
  *
  * - アセットの置き場（assetBase）: Vite の base（import.meta.env.BASE_URL）。publicDir を地図のパッケージの assets/ に向けている（vite.config.ts）
  * - allTiles: 町じゅうを動くので、全部のタイルを初めから読む（kanon-lab の撮影モードと同じ）
- * - postEffects: 後処理は使わない（依存を増やさない。トーンマッピングはレンダラの設定）
+ * - postEffects: 後処理の段は地図の AnimeRender（アニメ塗りの輪郭線・トーンマッピング・SMAA。scene/Scene.tsx）だけで、使う側が組む後処理は無い
  * - 画質（quality・townQuality）: URL の引数 ?quality=low・?town=low|high から（quality.ts）。町を作るときに決まるので、変えるときはページごと読み込み直す
  * - 町の地図データの読み込みの状態（onStatus）: townState に写し、聞いている所（onTownStatus。地図データの案内 ui/TownNotice.tsx・ワープの一覧 teleport.ts）へ知らせる
  * - 確かめ用の URL の引数: ?debug（地図のデバッグの道具と window.__walker。debug.ts）。町の時刻と日付（?time=HH:MM・?date=YYYY-MM-DD と、時刻のつまみ）は clock.ts

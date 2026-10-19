@@ -15,6 +15,9 @@ export { createCharacterVisual } from './avatar/characterVisual'
 export type { CharacterVisual, CharacterVisualClip, CharacterVisualOptions, CharacterVisualStatus } from './avatar/characterVisual'
 export { VISUAL_DEFAULTS } from './avatar/visualConfig'
 export type { VisualConfig } from './avatar/visualConfig'
+// アニメ塗りのラボ・町に立つ VRM の MToon の合わせ（既定の値と、材質ごと・mesh ごとの上書き）
+export { configureVrmAnime, VRM_ANIME } from './avatar/vrmAnime'
+export type { VrmAnimeLineRule, VrmAnimeMaterialRule, VrmAnimeOverrides } from './avatar/vrmAnime'
 // 歩き（毎コマ進める・立ち寄り先へ置く・歩かせる・止める）と通り道（点と障害物を差し替える）
 export { goTo, placeAt, stopWalking, updateLocomotion } from './avatar/locomotion'
 export { configureNav } from './avatar/nav'

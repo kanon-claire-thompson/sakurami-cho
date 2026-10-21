@@ -1,24 +1,24 @@
 import * as THREE from 'three'
 import type { BodyMetrics, BodyPose } from './body'
 import { JUMP_CROUCH, type CharacterJump, type JumpPhase } from './jump'
+import { VISUAL_DEFAULTS, type JumpLookConfig } from './visualConfig'
 
 /**
  * 跳ぶ姿勢（見た目の側。character/avatar/characterVisual.ts が毎コマ使う。跳ぶ動きそのものは character/avatar/jump.ts）。
  * 段階（motion.jump）から、跳ぶ .vrma の 3 本（踏み切り start・跳んでいる間 loop・着く land。visualConfig.ts の animations.jump）を
  * どの時刻で・どの強さで混ぜるかと、.vrma が無いときのコードの姿勢（しゃがむ → 伸びる → 着いてしゃがむ）を決める。
  *
- * - 踏み切る前（crouch）: 踏み切りの初め（しゃがんだ姿勢）へ、CROUCH_WEIGHT の強さまで寄せる（素材のしゃがみは深いので、半分ほどにする）
- * - 跳んでいる間（air）: 踏み切りを再生しながら 0.1 秒で強さ AIR_WEIGHT へ（伸びる。素材は膝を深く抱えるので、待機の脚と混ぜて浅くする）。上りの終わりから下りへ、跳んでいる間のループへ移す
- * - 着いたら（land）: 着くを初めから再生し、強さを落としてしゃがむ深さを浅くし（着いた速さで深さを変える）、LAND_LOOK 秒で待機・歩きへ戻す。
- *   着いてからの戻りは、跳ぶ段階（land は JUMP_LAND 秒）より長く見せる（その間に歩き出しても、歩きと混ぜて戻す）
+ * 強さ・再生の速さ・着くの深さなどの値は素材によるので、見た目の設定の jump（visualConfig.ts の VISUAL_DEFAULTS.jump。キャラクターごとに置き換えられる）から読む。
+ *
+ * - 踏み切る前（crouch）: 踏み切りの初め（しゃがんだ姿勢）へ、crouchWeight の強さまで寄せる（素材のしゃがみは深いので、半分ほどにする）
+ * - 跳んでいる間（air）: 踏み切りを startRate 倍の速さで再生しながら 0.1 秒で強さ airWeight へ（伸びる。素材は膝を深く抱えるので、待機の脚と混ぜて浅くする）。
+ *   上りの終わりから下りへ、跳んでいる間のループへ移す
+ * - 着いたら（land）: 着くを landStart 秒から再生し、landSwap 秒でループから入れ替え、強さを落としてしゃがむ深さを浅くし（着いた速さで深さを変える。landDepth）、
+ *   LAND_LOOK 秒で待機・歩きへ戻す。着いてからの戻りは、跳ぶ段階（land は JUMP_LAND 秒）より長く見せる（その間に歩き出しても、歩きと混ぜて戻す）
  * - コードの姿勢: しゃがむ深さ crouch（太ももを前へ・膝を曲げ・腰を下げ（足が床から動かない量）・前へ傾け・腕を後ろへ）と、
  *   跳んでいる間の脚の曲げ tuck（膝を軽く曲げ、腕を前へ上げる）
  */
 
-/** 踏み切る前のしゃがみ（素材の踏み切りの初めの姿勢へ寄せる強さ） */
-const CROUCH_WEIGHT = 0.5
-/** 跳んでいる間の強さ（素材の跳んでいる間は膝を深く抱えるので、待機の脚と混ぜて浅くする） */
-const AIR_WEIGHT = 0.75
 /** 跳んでからの、伸びる長さ（秒） */
 const EXTEND = 0.1
 /** 着いてからの見た目の長さ（秒）と、着くの再生の速さ */
@@ -77,28 +77,29 @@ function arc(j: CharacterJump) {
   return j.v0 > 1e-3 ? THREE.MathUtils.clamp((j.v0 - j.vy) / (2 * j.v0), 0, 1) : 1
 }
 
-/** 跳ぶ .vrma の時刻と強さ（out に書いて返す） */
-export function jumpClipWeights(st: JumpLook, j: CharacterJump, out: JumpClipWeights): JumpClipWeights {
+/** 跳ぶ .vrma の時刻と強さ（out に書いて返す。cfg = 見た目の設定の jump） */
+export function jumpClipWeights(st: JumpLook, j: CharacterJump, out: JumpClipWeights, cfg: JumpLookConfig = VISUAL_DEFAULTS.jump): JumpClipWeights {
   out.start.weight = out.loop.weight = out.land.weight = 0
   out.start.time = 0
   out.loop.time = st.airT
   out.land.time = 0
   if (j.phase === 'crouch') {
-    out.start.weight = CROUCH_WEIGHT * smooth(j.t / JUMP_CROUCH)
+    out.start.weight = cfg.crouchWeight * smooth(j.t / JUMP_CROUCH)
   } else if (j.phase === 'air') {
-    const w = THREE.MathUtils.lerp(CROUCH_WEIGHT, AIR_WEIGHT, smooth(j.t / EXTEND))
+    const w = THREE.MathUtils.lerp(cfg.crouchWeight, cfg.airWeight, smooth(j.t / EXTEND))
     const f = THREE.MathUtils.smoothstep(arc(j), 0.3, 0.75)
-    out.start.time = j.t
+    out.start.time = j.t * cfg.startRate
     out.start.weight = w * (1 - f)
     out.loop.weight = w * f
   } else if (Number.isFinite(st.landT)) {
     const L = st.landT
     // しゃがむ深さ（着くの素材は深くしゃがむので、強さで浅くする。速く着いたほど深く）
-    const depth = THREE.MathUtils.clamp(0.3 + 0.08 * st.impact, 0.3, 0.6)
-    const w = THREE.MathUtils.lerp(AIR_WEIGHT, depth, smooth(L / 0.12)) * (1 - smooth((L - 0.28) / (LAND_LOOK - 0.3)))
-    const x = smooth(L / 0.06)
+    const [lo, hi] = cfg.landDepth
+    const depth = THREE.MathUtils.clamp(lo + cfg.landDepthPerImpact * st.impact, lo, hi)
+    const w = THREE.MathUtils.lerp(cfg.airWeight, depth, smooth(L / 0.12)) * (1 - smooth((L - 0.28) / (LAND_LOOK - 0.3)))
+    const x = cfg.landSwap > 0 ? smooth(L / cfg.landSwap) : 1
     out.loop.weight = w * (1 - x)
-    out.land.time = L * LAND_RATE
+    out.land.time = cfg.landStart + L * LAND_RATE
     out.land.weight = w * x
   }
   out.total = out.start.weight + out.loop.weight + out.land.weight

@@ -697,7 +697,7 @@ class VrmCharacterVisual implements CharacterVisual {
     // 跳ぶ: 跳ぶ .vrma があれば、その強さ（jw）の分だけ待機・歩き・身ぶり・行動の腰から下を弱める。無ければコードの姿勢（下の applyJumpPose）
     updateJumpLook(this.jumpLook, m.jump, delta)
     const jumpClips = r.mixer ? r.jump : null
-    const jw = jumpClips ? jumpClipWeights(this.jumpLook, m.jump, this.jumpWeights).total : 0
+    const jw = jumpClips ? jumpClipWeights(this.jumpLook, m.jump, this.jumpWeights, cfg.jump).total : 0
     const jumpCode = jumpClips ? null : jumpCodeAmounts(this.jumpLook, m.jump)
     const mw = motion && clip ? clip.weight * (1 - m.walk) * (1 - jw) : 0
 

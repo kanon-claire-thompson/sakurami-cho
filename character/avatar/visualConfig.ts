@@ -122,6 +122,29 @@ export const VISUAL_DEFAULTS = {
    */
   idleMix: { fade: 1.6, minSlot: 14, seed: 2035 },
 
+  /**
+   * 跳ぶ .vrma（animations.jump）の混ぜ方（character/avatar/jumpPose.ts の jumpClipWeights）。.vrma の素材に合わせて、キャラクターごとに置き換える
+   * （既定は地図の .vrma の物。踏み切りが短い・着くが宙から始まる .vrma などは、それに合わせた値を入れる）
+   */
+  jump: {
+    /** 踏み切る前のしゃがみ（踏み切りの初めの姿勢へ寄せる強さ。素材のしゃがみは深いので、半分ほどにする） */
+    crouchWeight: 0.5,
+    /** 跳んでいる間の強さ（素材の跳んでいる間は膝を深く抱えるので、待機の脚と混ぜて浅くする） */
+    airWeight: 0.75,
+    /** 跳んでいる間の、踏み切りの再生の速さ（1 = 跳んでからの秒のまま） */
+    startRate: 1,
+    /** 着いてから、跳んでいる間のループを着くへ入れ替える長さ（秒） */
+    landSwap: 0.06,
+    /** 着くの再生の始めの時刻（秒。素材の初めの、まだ宙にいる所を飛ばす） */
+    landStart: 0,
+    /**
+     * 着いてしゃがむ深さ（着くの強さ）: 着いた速さ impact（m/s）から landDepth[0] + landDepthPerImpact × impact を、
+     * landDepth の間に収める（着くの素材は深くしゃがむので、強さで浅くする。速く着いたほど深く）
+     */
+    landDepth: [0.3, 0.6] as [number, number],
+    landDepthPerImpact: 0.08,
+  },
+
   /** 影を落とす */
   castShadow: true,
 } as const
@@ -150,7 +173,19 @@ export interface VisualConfig {
   idleMix: { fade: number; minSlot: number; seed: number }
   blink: string
   mtoon: VrmMtoonConfig
+  jump: JumpLookConfig
   castShadow: boolean
+}
+
+/** 跳ぶ .vrma の混ぜ方（character/avatar/jumpPose.ts の jumpClipWeights） */
+export interface JumpLookConfig {
+  crouchWeight: number
+  airWeight: number
+  startRate: number
+  landSwap: number
+  landStart: number
+  landDepth: readonly [number, number]
+  landDepthPerImpact: number
 }
 
 /** 待機の姿勢とまばたき（character/avatar/pose.ts の idleBasePose も読む） */

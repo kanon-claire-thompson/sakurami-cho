@@ -254,3 +254,20 @@ glTF の `asset.copyright` にも著作権の表示を入れる）、歩きは Q
 `idleMix.fade` 秒かけて入れ替える（`character/avatar/idleMix.ts`。1 つの枠は `idleMix.minSlot` 秒以上。同じ時刻なら同じ画になる）。
 寄りの画で揺れを弱める `steady` は、切り替えの強さで混ぜた待機の平均の姿勢へ寄せる。切り替えをやめるなら `animations` の `idleVariants` を `[]` にする。
 ファイルごとの素材と MIT の全文は `assets/models/animations/CREDITS.md`。取ってきたライセンスの文書に MIT / CC0 と書いてあるかは、道具が作るときに確かめる。
+
+跳ぶ `.vrma` の混ぜ方: 段階（踏み切る前・跳んでいる間・着いたら）ごとに 3 本をどの時刻・強さで重ねるかは `character/avatar/jumpPose.ts` の `jumpClipWeights` が決め、
+素材に合わせる値は見た目の設定の `jump`（`VISUAL_DEFAULTS.jump`。`createCharacterVisual` の `jump` で欄ごと置き換える）から読む。
+`animations.jump` を自分の `.vrma` に替えるときに、合わせて直す（既定はここの `jump-*.vrma` の物）。
+
+| 欄 | 既定 | 中身 |
+|---|---|---|
+| `crouchWeight` | 0.5 | 踏み切る前に、踏み切りの初め（しゃがんだ姿勢）へ寄せる強さ。跳んでいる間の初めの強さもここから |
+| `airWeight` | 0.75 | 跳んでいる間の強さ（残りは待機の脚） |
+| `startRate` | 1 | 跳んでいる間の、踏み切りの再生の速さ（跳んでからの秒 × これ） |
+| `landSwap` | 0.06 | 着いてから、跳んでいる間のループを着くへ入れ替える長さ（秒） |
+| `landStart` | 0 | 着くの再生の始めの時刻（秒。素材の初めの、まだ宙にいる所を飛ばす） |
+| `landDepth`・`landDepthPerImpact` | [0.3, 0.6]・0.08 | 着いてしゃがむ深さ（着くの強さ）: `landDepth[0] + landDepthPerImpact × 着いた速さ（m/s）` を `landDepth` の間に収める |
+
+```ts
+createCharacterVisual(ch, { ..., animations: { ...VISUAL_DEFAULTS.animations, jump: myJump }, jump: { ...VISUAL_DEFAULTS.jump, crouchWeight: 0.7, landStart: 0.12 } })
+```
